@@ -6,11 +6,11 @@
 
 	// cells: target cell count for adaptive grids; square: always use equal W/H
 	const DIFFICULTIES = [
-		{ label: 'Easy',       cells:   36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400' },
-		{ label: 'Normal',     cells:   81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400'     },
-		{ label: 'Hard',       cells:  256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400'  },
-		{ label: 'Super Hard', cells: 1024, square: false, color: 'from-orange-500 to-orange-600',  ring: 'ring-orange-400'  },
-		{ label: 'Expert',     cells: 4096, square: false, color: 'from-rose-600 to-rose-700',      ring: 'ring-rose-400'    },
+		{ label: 'Easy',       cells:   36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400', chartColor: '#10b981' },
+		{ label: 'Normal',     cells:   81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400',     chartColor: '#0ea5e9' },
+		{ label: 'Hard',       cells:  256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6' },
+		{ label: 'Super Hard', cells: 1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316' },
+		{ label: 'Expert',     cells: 4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48' },
 	];
 
 	// Compute W × H for a difficulty, fitting the current viewport aspect ratio.
@@ -50,7 +50,7 @@
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
-	let gameState = $state<'menu' | 'playing'>('menu');
+	let gameState = $state<'menu' | 'playing' | 'stats'>('menu');
 	let W = $state(9);
 	let H = $state(9);
 
@@ -403,6 +403,33 @@
 		gameState = 'menu';
 	}
 
+	function goToStats() { gameState = 'stats'; }
+
+	// ─── chart data ──────────────────────────────────────────────────────────────
+
+	// Pre-compute donut segments from win counts.
+	// Each segment has: startAngle (deg, 0 = top), dash (px along circumference).
+	const DONUT_R = 65;
+	const DONUT_C = 2 * Math.PI * DONUT_R;
+	const DONUT_GAP = 2; // px gap cut from each segment's leading edge
+
+	const chartSegments = $derived(
+		(() => {
+			const total = DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0);
+			let cumFrac = 0;
+			return DIFFICULTIES.map(d => {
+				const count  = progress[d.label] ?? 0;
+				const frac   = total > 0 ? count / total : 0;
+				const angle  = cumFrac * 360 - 90; // -90° → start segment at 12 o'clock
+				const dash   = Math.max(0, frac * DONUT_C - DONUT_GAP);
+				cumFrac += frac;
+				return { ...d, count, frac, total, angle, dash };
+			});
+		})()
+	);
+
+	const totalWins = $derived(DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
+
 	let showGrid  = $state(true);
 	let menuOpen  = $state(false);
 
@@ -466,6 +493,87 @@
 					</div>
 				</button>
 			{/each}
+		</div>
+
+		<button
+			onclick={goToStats}
+			class="text-slate-500 hover:text-slate-300 text-sm transition-colors mt-2 flex items-center gap-1.5"
+		>
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+				<rect x="1" y="7" width="3" height="6" rx="0.5"/>
+				<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
+				<rect x="10" y="1" width="3" height="12" rx="0.5"/>
+			</svg>
+			Stats
+		</button>
+	</main>
+
+{:else if gameState === 'stats'}
+	<!-- Stats screen -->
+	<main class="w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
+
+		<!-- Top bar -->
+		<div class="h-12 shrink-0 flex items-center px-4 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm">
+			<button
+				onclick={goToMenu}
+				class="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60
+				       hover:bg-slate-700 hover:text-slate-200 transition-colors"
+			>← Back</button>
+			<span class="flex-1 text-center text-white font-bold tracking-wide">Stats</span>
+			<div class="w-[4.5rem]"></div>
+		</div>
+
+		<!-- Scrollable content -->
+		<div class="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-8 px-6 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+
+			<!-- Donut chart -->
+			<svg viewBox="0 0 200 200" width="220" height="220" style="overflow:visible">
+				<!-- Background ring -->
+				<circle cx="100" cy="100" r={DONUT_R} fill="none" stroke="rgba(51,65,85,0.5)" stroke-width="28" />
+
+				{#if totalWins > 0}
+					{#each chartSegments as seg}
+						{#if seg.frac > 0}
+							<circle
+								cx="100" cy="100" r={DONUT_R}
+								fill="none"
+								stroke={seg.chartColor}
+								stroke-width="28"
+								stroke-dasharray="{seg.dash} {DONUT_C}"
+								transform="rotate({seg.angle}, 100, 100)"
+								stroke-linecap="butt"
+							/>
+						{/if}
+					{/each}
+				{/if}
+
+				<!-- Centre label -->
+				{#if totalWins === 0}
+					<text x="100" y="100" text-anchor="middle" dominant-baseline="middle"
+						font-size="13" fill="rgb(100,116,139)">No wins yet</text>
+				{:else}
+					<text x="100" y="90" text-anchor="middle" dominant-baseline="middle"
+						font-size="36" font-weight="800" fill="white">{totalWins}</text>
+					<text x="100" y="116" text-anchor="middle" dominant-baseline="middle"
+						font-size="12" fill="rgb(100,116,139)" letter-spacing="1">
+						{totalWins === 1 ? 'TOTAL WIN' : 'TOTAL WINS'}
+					</text>
+				{/if}
+			</svg>
+
+			<!-- Breakdown legend -->
+			<div class="w-full max-w-xs flex flex-col divide-y divide-slate-800/60">
+				{#each chartSegments as seg}
+					<div class="flex items-center gap-3 py-3">
+						<div class="w-3 h-3 rounded-full shrink-0" style="background:{seg.chartColor}"></div>
+						<span class="text-slate-300 flex-1 text-sm font-medium">{seg.label}</span>
+						<span class="text-white font-bold tabular-nums w-8 text-right">{seg.count}</span>
+						<span class="text-slate-500 text-sm tabular-nums w-10 text-right">
+							{seg.total > 0 ? Math.round(seg.frac * 100) : 0}%
+						</span>
+					</div>
+				{/each}
+			</div>
 		</div>
 	</main>
 

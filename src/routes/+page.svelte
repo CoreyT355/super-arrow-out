@@ -71,9 +71,9 @@
 
 	// Timing constants
 	const MS_PER_STEP = 90;
-	const NUDGE_FWD  = 260;
-	const NUDGE_BACK = 280;
-	const FLASH_HALF = 130;
+	const NUDGE_FWD  = 140; // ms to nudge toward blocker
+	const NUDGE_BACK = 140; // ms to spring back
+	const FLASH_HALF = 90;  // ms per flash half (×4 = total flash duration)
 
 	const DIR_ROT: Record<Direction, number> = { E: 0, S: 90, W: 180, N: 270 };
 

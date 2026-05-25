@@ -4,13 +4,30 @@
 
 	// ─── difficulty config ───────────────────────────────────────────────────────
 
+	// cells: target cell count for adaptive grids; square: always use equal W/H
 	const DIFFICULTIES = [
-		{ label: 'Easy',       w:  6, h:  6, caption: '6 × 6 grid',   color: 'from-emerald-500 to-emerald-600',  ring: 'ring-emerald-400' },
-		{ label: 'Normal',     w:  9, h:  9, caption: '9 × 9 grid',   color: 'from-sky-500 to-sky-600',          ring: 'ring-sky-400'     },
-		{ label: 'Hard',       w: 16, h: 16, caption: '16 × 16 grid', color: 'from-violet-500 to-violet-600',    ring: 'ring-violet-400'  },
-		{ label: 'Super Hard', w: 32, h: 32, caption: '32 × 32 grid', color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400'  },
-		{ label: 'Expert',     w: 64, h: 64, caption: '64 × 64 grid', color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400'    },
-	] as const;
+		{ label: 'Easy',       cells:   36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400' },
+		{ label: 'Normal',     cells:   81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400'     },
+		{ label: 'Hard',       cells:  256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400'  },
+		{ label: 'Super Hard', cells: 1024, square: false, color: 'from-orange-500 to-orange-600',  ring: 'ring-orange-400'  },
+		{ label: 'Expert',     cells: 4096, square: false, color: 'from-rose-600 to-rose-700',      ring: 'ring-rose-400'    },
+	];
+
+	// Compute W × H for a difficulty, fitting the current viewport aspect ratio.
+	function computeGridSize(cells: number, square: boolean): { w: number; h: number } {
+		const s = Math.round(Math.sqrt(cells));
+		if (square || typeof window === 'undefined') return { w: s, h: s };
+		// Available play area (rough estimate: 80px for button row + padding)
+		const ratio = Math.max(0.4, Math.min(2.5, window.innerWidth / (window.innerHeight - 80)));
+		const w = Math.max(4, Math.round(Math.sqrt(cells * ratio)));
+		const h = Math.max(4, Math.round(Math.sqrt(cells / ratio)));
+		return { w, h };
+	}
+
+	function gridCaption(cells: number, square: boolean): string {
+		const { w, h } = computeGridSize(cells, square);
+		return `${w} × ${h} grid`;
+	}
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
@@ -326,8 +343,9 @@
 
 	// ─── game control ────────────────────────────────────────────────────────────
 
-	function startGame(w: number, h: number) {
+	function startGame(cells: number, square: boolean) {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+		const { w, h } = computeGridSize(cells, square);
 		W = w; H = h;
 		removed = new Set();
 		anims   = {};
@@ -352,6 +370,8 @@
 		gameState = 'menu';
 	}
 
+	let showGrid = $state(true);
+
 	const won = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
 </script>
 
@@ -366,13 +386,13 @@
 		<div class="flex flex-col gap-4 w-full max-w-xs">
 			{#each DIFFICULTIES as d}
 				<button
-					onclick={() => startGame(d.w, d.h)}
+					onclick={() => startGame(d.cells, d.square)}
 					class="group relative flex flex-col items-center py-4 px-6 rounded-2xl bg-gradient-to-br {d.color}
 					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
 					       ring-2 ring-transparent hover:{d.ring} focus-visible:{d.ring} focus-visible:outline-none"
 				>
 					<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
-					<span class="text-white/70 text-sm mt-0.5">{d.caption}</span>
+					<span class="text-white/70 text-sm mt-0.5">{gridCaption(d.cells, d.square)}</span>
 				</button>
 			{/each}
 		</div>
@@ -390,8 +410,14 @@
 				Board size: as large as possible while leaving ~72px for the buttons below.
 				touch-none → touch-action:none so our action owns all touch gestures.
 			-->
+			<!--
+				Width: the lesser of 96vw and (available height × grid aspect ratio).
+				aspect-ratio then sets the height automatically, so the board fills
+				the screen in whichever dimension is the constraint.
+			-->
 			<div
-				class="w-[min(96vw,calc(100dvh-5rem))] h-[min(96vw,calc(100dvh-5rem))] overflow-hidden rounded-xl touch-none"
+				style="width: min(96vw, calc((100dvh - 5rem) * {W / H})); aspect-ratio: {W} / {H};"
+				class="overflow-hidden rounded-xl touch-none"
 				use:panZoomAction
 			>
 				<svg
@@ -400,15 +426,17 @@
 					overflow="hidden"
 				>
 					<!-- empty cell backgrounds -->
-					{#each Array(H) as _, row}
-						{#each Array(W) as _, col}
-							<rect
-								x={col + 0.06} y={row + 0.06}
-								width={0.88} height={0.88} rx={0.18}
-								class="fill-slate-700/60"
-							/>
+					{#if showGrid}
+						{#each Array(H) as _, row}
+							{#each Array(W) as _, col}
+								<rect
+									x={col + 0.06} y={row + 0.06}
+									width={0.88} height={0.88} rx={0.18}
+									class="fill-slate-700/60"
+								/>
+							{/each}
 						{/each}
-					{/each}
+					{/if}
 
 					<!-- arrows -->
 					{#each level.arrows as arrow (arrow.id)}
@@ -465,7 +493,7 @@
 			</div>
 		</div>
 
-		<div class="flex gap-3">
+		<div class="flex items-center gap-3">
 			<button
 				onclick={goToMenu}
 				class="px-5 py-2 bg-slate-800 text-slate-400 font-medium rounded-lg border border-slate-700/60 hover:bg-slate-700 hover:text-slate-200 transition-colors"
@@ -478,6 +506,14 @@
 			>
 				Regenerate
 			</button>
+			<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm">
+				<input
+					type="checkbox"
+					bind:checked={showGrid}
+					class="w-4 h-4 rounded accent-slate-400 cursor-pointer"
+				/>
+				Grid
+			</label>
 		</div>
 	</main>
 {/if}

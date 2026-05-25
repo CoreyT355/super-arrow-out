@@ -2,7 +2,7 @@
 
 A puzzle game where you clear a grid by launching colour-coded arrow snakes out of bounds — one blocked move costs a life.
 
-**[Play it live →](https://super-arrow-out-git-feature-progress-tracking-corey-ts-projects.vercel.app)**
+**[Play it live →](https://arrows.coreytess.dev)**
 
 ---
 

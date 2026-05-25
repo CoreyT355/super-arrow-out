@@ -1,5 +1,16 @@
 @import 'tailwindcss';
 
+/* ── Mobile base styles ─────────────────────────────────────────────────────
+   Prevent iOS bounce-scroll and page-level zoom/scroll that would fight
+   the in-game pinch-zoom handler.                                           */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation; /* kills double-tap zoom on elements without touch-none */
+  -webkit-tap-highlight-color: transparent;
+}
+
 @theme {
   --animate-shake: shake 0.25s ease-in-out;
 

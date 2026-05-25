@@ -12,7 +12,7 @@
 		{ label: 'Expert',     w: 64, h: 64, caption: '64 × 64 grid', color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400'    },
 	] as const;
 
-	// ─── state ───────────────────────────────────────────────────────────────────
+	// ─── game state ──────────────────────────────────────────────────────────────
 
 	let gameState = $state<'menu' | 'playing'>('menu');
 	let W = $state(9);
@@ -40,11 +40,168 @@
 		maxSteps?: number;
 	}
 
-	let level     = $state(generateLevel(9, 9));
-	let removed   = $state(new Set<number>());
-	let anims     = $state<Record<number, Anim>>({});
-	let now       = $state(performance.now());
+	let level   = $state(generateLevel(9, 9));
+	let removed = $state(new Set<number>());
+	let anims   = $state<Record<number, Anim>>({});
+	let now     = $state(performance.now());
 	let rafId: number | null = null;
+
+	// ─── pan / zoom ──────────────────────────────────────────────────────────────
+
+	const MIN_SCALE = 1;
+	const MAX_SCALE = 8;
+
+	let scale = $state(1);
+	let panX  = $state(0);
+	let panY  = $state(0);
+
+	// Non-reactive gesture tracking (mutated freely, never drives rendering directly)
+	let _node: HTMLElement | null = null;
+	let _activeT = new Map<number, { x: number; y: number }>();
+	let _panX0 = 0, _panY0 = 0, _t0 = { x: 0, y: 0 }, _didMove = false;
+	let _pinchD0 = 0, _pinchS0 = 1, _pinchPX0 = 0, _pinchPY0 = 0;
+	let _pinchMid = { x: 0, y: 0 };
+
+	function clampPan(px: number, py: number, s: number) {
+		if (!_node) return { x: px, y: py };
+		const { width: w, height: h } = _node.getBoundingClientRect();
+		return {
+			x: s <= 1 ? 0 : Math.min(0, Math.max(w * (1 - s), px)),
+			y: s <= 1 ? 0 : Math.min(0, Math.max(h * (1 - s), py)),
+		};
+	}
+
+	function resetView() { scale = 1; panX = 0; panY = 0; }
+
+	function onTouchStart(e: TouchEvent) {
+		for (const t of Array.from(e.changedTouches))
+			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
+
+		if (_activeT.size === 1) {
+			const [t] = _activeT.values();
+			_t0 = { ...t }; _panX0 = panX; _panY0 = panY; _didMove = false;
+		} else if (_activeT.size === 2) {
+			const [a, b] = _activeT.values();
+			const rect = _node!.getBoundingClientRect();
+			_pinchD0  = Math.hypot(b.x - a.x, b.y - a.y);
+			_pinchS0  = scale; _pinchPX0 = panX; _pinchPY0 = panY;
+			_pinchMid = { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top };
+		}
+	}
+
+	function onTouchMove(e: TouchEvent) {
+		e.preventDefault(); // must be non-passive to work; see panZoomAction
+		for (const t of Array.from(e.changedTouches))
+			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
+
+		if (_activeT.size === 1) {
+			const [t] = _activeT.values();
+			const dx = t.x - _t0.x, dy = t.y - _t0.y;
+			if (Math.hypot(dx, dy) > 4) _didMove = true;
+			if (_didMove) {
+				const c = clampPan(_panX0 + dx, _panY0 + dy, scale);
+				panX = c.x; panY = c.y;
+			}
+		} else if (_activeT.size >= 2) {
+			const [a, b] = _activeT.values();
+			const d = Math.hypot(b.x - a.x, b.y - a.y);
+			const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, _pinchS0 * d / _pinchD0));
+			const r = s / _pinchS0;
+			const c = clampPan(
+				_pinchMid.x - (_pinchMid.x - _pinchPX0) * r,
+				_pinchMid.y - (_pinchMid.y - _pinchPY0) * r,
+				s
+			);
+			scale = s; panX = c.x; panY = c.y;
+		}
+	}
+
+	function onTouchEnd(e: TouchEvent) {
+		for (const t of Array.from(e.changedTouches))
+			_activeT.delete(t.identifier);
+
+		if (_activeT.size === 1) {
+			// Dropped to 1 finger — reset single-touch pan baseline
+			const [t] = _activeT.values();
+			_t0 = { ...t }; _panX0 = panX; _panY0 = panY; _didMove = false;
+		}
+		// Snap back to unzoomed if barely zoomed
+		if (_activeT.size === 0 && scale < 1.05) resetView();
+	}
+
+	// All pointer listeners go through the action so passive flags are explicit.
+	// touchmove must be non-passive to allow preventDefault() which stops the
+	// browser from claiming the gesture as a scroll before we can pan.
+	function panZoomAction(node: HTMLElement) {
+		_node = node;
+
+		function onWheel(e: WheelEvent) {
+			e.preventDefault();
+			const rect = node.getBoundingClientRect();
+			const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+			const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+			const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
+			const r = s / scale;
+			const c = clampPan(mx - (mx - panX) * r, my - (my - panY) * r, s);
+			scale = s; panX = c.x; panY = c.y;
+		}
+
+		node.addEventListener('touchstart',  onTouchStart, { passive: true  });
+		node.addEventListener('touchmove',   onTouchMove,  { passive: false }); // ← non-passive
+		node.addEventListener('touchend',    onTouchEnd,   { passive: true  });
+		node.addEventListener('touchcancel', onTouchEnd,   { passive: true  });
+		node.addEventListener('wheel',       onWheel,      { passive: false });
+
+		return {
+			destroy() {
+				node.removeEventListener('touchstart',  onTouchStart);
+				node.removeEventListener('touchmove',   onTouchMove);
+				node.removeEventListener('touchend',    onTouchEnd);
+				node.removeEventListener('touchcancel', onTouchEnd);
+				node.removeEventListener('wheel',       onWheel);
+				_node = null;
+			}
+		};
+	}
+
+	// ─── rounded snake path ──────────────────────────────────────────────────────
+
+	// Converts animated segment positions into an SVG path string.
+	// Straight runs use L; turns use a quadratic bézier (Q) so corners are smooth.
+	function roundedPath(pts: { x: number; y: number }[], r: number): string {
+		if (pts.length === 0) return '';
+		const cx = (p: { x: number; y: number }) => p.x + 0.5;
+		const cy = (p: { x: number; y: number }) => p.y + 0.5;
+		if (pts.length === 1) return `M ${cx(pts[0])} ${cy(pts[0])}`;
+		if (pts.length === 2) return `M ${cx(pts[0])} ${cy(pts[0])} L ${cx(pts[1])} ${cy(pts[1])}`;
+
+		let d = `M ${cx(pts[0])} ${cy(pts[0])}`;
+
+		for (let i = 1; i < pts.length - 1; i++) {
+			const ax = cx(pts[i - 1]), ay = cy(pts[i - 1]);
+			const bx = cx(pts[i    ]), by = cy(pts[i    ]);
+			const ex = cx(pts[i + 1]), ey = cy(pts[i + 1]);
+
+			const dx1 = bx - ax, dy1 = by - ay;
+			const dx2 = ex - bx, dy2 = ey - by;
+			const len1 = Math.hypot(dx1, dy1) || 1;
+			const len2 = Math.hypot(dx2, dy2) || 1;
+
+			// Cross product detects a direction change (turn vs straight)
+			if (Math.abs(dx1 * dy2 - dy1 * dx2) < 0.001 * len1 * len2) {
+				d += ` L ${bx} ${by}`; // straight — pass through
+			} else {
+				const r1 = Math.min(r, len1 / 2);
+				const r2 = Math.min(r, len2 / 2);
+				const p1x = bx - (dx1 / len1) * r1, p1y = by - (dy1 / len1) * r1;
+				const p2x = bx + (dx2 / len2) * r2, p2y = by + (dy2 / len2) * r2;
+				d += ` L ${p1x} ${p1y} Q ${bx} ${by} ${p2x} ${p2y}`;
+			}
+		}
+
+		d += ` L ${cx(pts[pts.length - 1])} ${cy(pts[pts.length - 1])}`;
+		return d;
+	}
 
 	// ─── easing ─────────────────────────────────────────────────────────────────
 
@@ -114,6 +271,7 @@
 	// ─── click handler ───────────────────────────────────────────────────────────
 
 	function handleClick(id: number) {
+		if (_didMove) return; // swallow taps that ended a pan gesture
 		if (anims[id] || removed.has(id)) return;
 		const arrow = level.arrows.find(a => a.id === id);
 		if (!arrow) return;
@@ -174,6 +332,7 @@
 		removed = new Set();
 		anims   = {};
 		level   = generateLevel(w, h);
+		resetView();
 		gameState = 'playing';
 	}
 
@@ -182,12 +341,14 @@
 		removed = new Set();
 		anims   = {};
 		level   = generateLevel(W, H);
+		resetView();
 	}
 
 	function goToMenu() {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		removed   = new Set();
 		anims     = {};
+		resetView();
 		gameState = 'menu';
 	}
 
@@ -196,7 +357,7 @@
 
 {#if gameState === 'menu'}
 	<!-- ─── Start screen ─────────────────────────────────────────────────────── -->
-	<main class="w-full min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-10 p-6">
+	<main class="w-full h-dvh bg-slate-900 flex flex-col items-center justify-center gap-6 p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
 		<div class="text-center">
 			<h1 class="text-5xl font-extrabold text-white tracking-tight mb-2">Arrow Out</h1>
 			<p class="text-slate-400 text-lg">Click a snake to send it sliding — clear the board to win.</p>
@@ -219,12 +380,23 @@
 
 {:else}
 	<!-- ─── Game screen ──────────────────────────────────────────────────────── -->
-	<main class="w-full min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-6 p-4">
-		<div class="relative bg-slate-800 p-4 rounded-2xl shadow-2xl border border-slate-700/50">
-			<div class="w-[min(90vw,90vh)] h-[min(90vw,90vh)] overflow-hidden rounded-xl">
+	<!--
+		h-dvh     → dynamic viewport height: shrinks when browser chrome appears (mobile)
+		pb-safe   → padding-bottom: env(safe-area-inset-bottom) for notched phones
+	-->
+	<main class="w-full h-dvh bg-slate-900 flex flex-col items-center justify-center gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+		<div class="relative bg-slate-800 p-2 sm:p-4 rounded-2xl shadow-2xl border border-slate-700/50">
+			<!--
+				Board size: as large as possible while leaving ~72px for the buttons below.
+				touch-none → touch-action:none so our action owns all touch gestures.
+			-->
+			<div
+				class="w-[min(96vw,calc(100dvh-5rem))] h-[min(96vw,calc(100dvh-5rem))] overflow-hidden rounded-xl touch-none"
+				use:panZoomAction
+			>
 				<svg
 					viewBox="-0.1 -0.1 {W + 0.2} {H + 0.2}"
-					class="w-full h-full"
+					style="width:100%;height:100%;transform:translate({panX}px,{panY}px) scale({scale});transform-origin:0 0;"
 					overflow="hidden"
 				>
 					<!-- empty cell backgrounds -->
@@ -252,11 +424,11 @@
 								onclick={() => handleClick(arrow.id)}
 								style={anim ? 'cursor:default;pointer-events:none' : 'cursor:pointer'}
 							>
-								<polyline
-									points={pts.map(p => `${p.x + 0.5},${p.y + 0.5}`).join(' ')}
+								<path
+									d={roundedPath(pts, 0.4)}
 									fill="none"
 									stroke={red ? '#ef4444' : arrow.color}
-									stroke-width={0.28}
+									stroke-width={0.14}
 									stroke-linecap="round"
 									stroke-linejoin="round"
 									opacity={0.9}

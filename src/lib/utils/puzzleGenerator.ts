@@ -13,8 +13,6 @@ const COLORS = [
 	'#a3e635', // lime-400
 ];
 
-// The inward step direction for body growth, keyed by exit direction.
-// Exit N (top) → body grows south (+y). Exit E (right) → body grows west (-x). etc.
 const INWARD: Record<Direction, GridPos> = {
 	N: { x: 0, y: 1 },
 	S: { x: 0, y: -1 },
@@ -39,8 +37,6 @@ function allOccupied(grid: Grid, w: number, h: number): boolean {
 	return true;
 }
 
-// Scan a line of cells; returns true if every cell from (sx,sy) stepping (dx,dy)
-// until hitting the grid boundary is occupied.
 function clearPathToEdge(grid: Grid, sx: number, sy: number, dx: number, dy: number, w: number, h: number): boolean {
 	let x = sx + dx, y = sy + dy;
 	let reachedEdge = false;
@@ -50,9 +46,6 @@ function clearPathToEdge(grid: Grid, sx: number, sy: number, dx: number, dy: num
 		x += dx;
 		y += dy;
 	}
-	// The step that took us out-of-bounds means we just passed the edge.
-	// reachedEdge is true if we visited an edge cell along the way, OR
-	// if the very first step was already OOB (meaning sx,sy is the edge) — handled by callers.
 	return reachedEdge || (sx + dx < 0 || sx + dx >= w || sy + dy < 0 || sy + dy >= h);
 }
 
@@ -65,7 +58,6 @@ function getExitDirs(grid: Grid, x: number, y: number, w: number, h: number): Di
 	if (onTop) dirs.push('N');
 	if (onBottom) dirs.push('S');
 
-	// Interior cell — check if a straight run of occupied cells reaches the edge
 	if (dirs.length === 0) {
 		if (clearPathToEdge(grid, x, y, -1, 0, w, h)) dirs.push('W');
 		if (clearPathToEdge(grid, x, y, 1, 0, w, h)) dirs.push('E');
@@ -74,6 +66,36 @@ function getExitDirs(grid: Grid, x: number, y: number, w: number, h: number): Di
 	}
 
 	return dirs;
+}
+
+// Returns the sizes of all connected components of empty cells.
+function emptyPocketSizes(grid: Grid, w: number, h: number): number[] {
+	const visited = new Set<number>();
+	const sizes: number[] = [];
+	const key = (x: number, y: number) => y * w + x;
+
+	for (let y = 0; y < h; y++) {
+		for (let x = 0; x < w; x++) {
+			if (grid[y][x] !== 'empty' || visited.has(key(x, y))) continue;
+			const queue = [{ x, y }];
+			visited.add(key(x, y));
+			let size = 0;
+			while (queue.length > 0) {
+				const { x: cx, y: cy } = queue.shift()!;
+				size++;
+				for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+					const nx = cx + dx, ny = cy + dy;
+					if (inBounds(nx, ny, w, h) && grid[ny][nx] === 'empty' && !visited.has(key(nx, ny))) {
+						visited.add(key(nx, ny));
+						queue.push({ x: nx, y: ny });
+					}
+				}
+			}
+			sizes.push(size);
+		}
+	}
+
+	return sizes;
 }
 
 function generateArrow(
@@ -85,7 +107,6 @@ function generateArrow(
 	maxLen: number,
 	changeDirChance: number
 ): Arrow | null {
-	// Collect all valid exit positions
 	const exits: GridPos[] = [];
 	for (let y = 0; y < h; y++) {
 		for (let x = 0; x < w; x++) {
@@ -103,15 +124,12 @@ function generateArrow(
 
 	const exitDir = possibleDirs[Math.floor(Math.random() * possibleDirs.length)];
 
-	// Place head
 	grid[ey][ex] = 'occupied';
 	const path: GridPos[] = [{ x: ex, y: ey }];
 
-	// Grow body inward (opposite of exit direction)
 	let { x: stepX, y: stepY } = INWARD[exitDir];
 	let curX = ex, curY = ey;
 
-	// bodyLength = Random.Range(minLen - 1, maxLen - 1) exclusive upper → minLen-1 to maxLen-2 inclusive
 	const bodyLength = Math.floor(Math.random() * (maxLen - minLen)) + (minLen - 1);
 
 	for (let i = 0; i < bodyLength; i++) {
@@ -130,14 +148,12 @@ function generateArrow(
 		let next: GridPos;
 		if (hasPreferred) {
 			if (Math.random() < changeDirChance && neighbors.length > 1) {
-				// Change direction: pick a non-preferred neighbor
 				const others = neighbors.filter(p => !(p.x === preferred.x && p.y === preferred.y));
 				next = others[Math.floor(Math.random() * others.length)];
 			} else {
 				next = preferred;
 			}
 		} else {
-			// Preferred unavailable — pick randomly from available
 			next = neighbors[Math.floor(Math.random() * neighbors.length)];
 		}
 
@@ -152,6 +168,60 @@ function generateArrow(
 	return { id, direction: exitDir, path, color: COLORS[id % COLORS.length] };
 }
 
+function isAdjacent(a: GridPos, b: GridPos): boolean {
+	return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
+}
+
+function hasTurn(path: GridPos[]): boolean {
+	for (let i = 2; i < path.length; i++) {
+		if (
+			(path[i].x - path[i - 1].x) !== (path[i - 1].x - path[i - 2].x) ||
+			(path[i].y - path[i - 1].y) !== (path[i - 1].y - path[i - 2].y)
+		) return true;
+	}
+	return false;
+}
+
+// Absorb arrows shorter than minLen into an adjacent arrow's tail.
+// Only ever extends tails, so exit directions and solvability are preserved.
+function absorbShortArrows(arrows: Arrow[], minLen: number): Arrow[] {
+	let result = [...arrows];
+
+	let changed = true;
+	while (changed) {
+		changed = false;
+
+		const badIdx = result.findIndex(a => a.path.length < minLen);
+		if (badIdx === -1) break;
+
+		const bad = result[badIdx];
+		const badHead = bad.path[0];
+		const badTail = bad.path[bad.path.length - 1];
+
+		for (let i = 0; i < result.length; i++) {
+			if (i === badIdx) continue;
+			const other = result[i];
+			const tail = other.path[other.path.length - 1];
+
+			let extension: GridPos[] | null = null;
+			if (isAdjacent(tail, badHead)) {
+				extension = bad.path;
+			} else if (isAdjacent(tail, badTail)) {
+				extension = [...bad.path].reverse();
+			}
+
+			if (!extension) continue;
+
+			result[i] = { ...other, path: [...other.path, ...extension] };
+			result.splice(badIdx, 1);
+			changed = true;
+			break;
+		}
+	}
+
+	return result;
+}
+
 export function generateLevel(
 	width = 9,
 	height = 9,
@@ -163,10 +233,23 @@ export function generateLevel(
 	const arrows: Arrow[] = [];
 	let id = 0;
 	let consecutiveFails = 0;
+	const MIN_ARROW_LEN = 3;
 
-	while (!allOccupied(grid, width, height) && consecutiveFails < 200) {
+	while (!allOccupied(grid, width, height) && consecutiveFails < 400) {
 		const arrow = generateArrow(grid, id, width, height, minLength, maxLength, changeDirChance);
+
 		if (arrow) {
+			// Reject this placement if it strands any empty pocket too small to hold a valid arrow.
+			// Those pockets could never be filled without producing a short stub.
+			const pockets = emptyPocketSizes(grid, width, height);
+			const createsDeadPocket = pockets.some(s => s > 0 && s < MIN_ARROW_LEN);
+
+			if (createsDeadPocket) {
+				for (const p of arrow.path) grid[p.y][p.x] = 'empty';
+				consecutiveFails++;
+				continue;
+			}
+
 			arrows.push(arrow);
 			id++;
 			consecutiveFails = 0;
@@ -175,5 +258,13 @@ export function generateLevel(
 		}
 	}
 
-	return { width, height, arrows };
+	// Safety net: absorb any remaining short arrows (e.g. from the final few cells).
+	const finalArrows = absorbShortArrows(arrows, MIN_ARROW_LEN);
+
+	// Re-assign IDs and colours after merging.
+	return {
+		width,
+		height,
+		arrows: finalArrows.map((a, i) => ({ ...a, id: i, color: COLORS[i % COLORS.length] })),
+	};
 }

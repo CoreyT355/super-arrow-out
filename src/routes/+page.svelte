@@ -453,8 +453,9 @@
 
 	const totalWins = $derived(DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
 
-	let showGrid  = $state(true);
-	let menuOpen  = $state(false);
+	let showGrid       = $state(true);
+	let roundedCorners = $state(true);
+	let menuOpen       = $state(false);
 
 	// Pre-compute SVG path strings and head positions for every arrow at s=0.
 	// These are used by the static (non-animating) render branch so idle arrows
@@ -462,7 +463,7 @@
 	const staticArrowData = $derived(
 		Object.fromEntries(level.arrows.map(arrow => [
 			arrow.id,
-			{ d: roundedPath(arrow.path, 0.4), head: arrow.path[0] },
+			{ d: roundedPath(arrow.path, roundedCorners ? 0.4 : 0), head: arrow.path[0] },
 		]))
 	);
 
@@ -648,6 +649,10 @@
 					<input type="checkbox" bind:checked={showGrid} class="w-3.5 h-3.5 rounded accent-slate-400 cursor-pointer" />
 					Grid
 				</label>
+				<label class="flex items-center gap-1.5 cursor-pointer select-none text-slate-400 text-sm">
+					<input type="checkbox" bind:checked={roundedCorners} class="w-3.5 h-3.5 rounded accent-slate-400 cursor-pointer" />
+					Rounded
+				</label>
 			</div>
 
 			<!-- Spacer -->
@@ -683,6 +688,10 @@
 				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
 					<input type="checkbox" bind:checked={showGrid} class="w-4 h-4 rounded accent-slate-400 cursor-pointer" />
 					Show Grid
+				</label>
+				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
+					<input type="checkbox" bind:checked={roundedCorners} class="w-4 h-4 rounded accent-slate-400 cursor-pointer" />
+					Rounded Corners
 				</label>
 			</div>
 		{/if}
@@ -732,7 +741,7 @@
 								{@const red  = isFlashRed(anim, el)}
 								<g style="cursor:default;pointer-events:none">
 									<path
-										d={roundedPath(pts, 0.4)}
+										d={roundedPath(pts, roundedCorners ? 0.4 : 0)}
 										fill="none"
 										stroke={red ? '#ef4444' : arrow.color}
 										stroke-width={0.14}

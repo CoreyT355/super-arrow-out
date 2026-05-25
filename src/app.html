@@ -3,6 +3,19 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+
+		<!-- PWA manifest -->
+		<link rel="manifest" href="/manifest.webmanifest" />
+
+		<!-- iOS home-screen app support -->
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<meta name="apple-mobile-web-app-title" content="Arrow Out" />
+		<link rel="apple-touch-icon" href="/icon-192.png" />
+
+		<!-- Theme colour for Android Chrome's browser chrome -->
+		<meta name="theme-color" content="#0f172a" />
+
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

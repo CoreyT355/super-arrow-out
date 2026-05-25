@@ -697,7 +697,7 @@
 		<div class="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
 			<div
 				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem) * {W / H})); aspect-ratio: {W} / {H};"
-				class="overflow-hidden rounded-xl touch-none"
+				class="relative overflow-hidden rounded-xl touch-none"
 				use:panZoomAction
 			>
 				<svg
@@ -774,28 +774,54 @@
 						{/if}
 					{/each}
 
-					<!-- Win overlay -->
+					<!-- Win overlay (dark scrim + title only — button is HTML below) -->
 					{#if won}
-						{@const fs  = Math.min(1, W * 0.11)}
-						{@const fs2 = fs * 0.55}
+						{@const fs = Math.min(1, W * 0.11)}
 						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.75)" />
-						<text x={W/2} y={H/2 - fs*0.6} text-anchor="middle" dominant-baseline="middle"
+						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
 							font-size={fs} font-weight="bold" fill="white">Level Complete</text>
-						<text x={W/2} y={H/2 + fs*0.9} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs2} fill="rgb(148,163,184)">tap Regenerate to play again</text>
 					{/if}
 
-					<!-- Game over overlay -->
+					<!-- Game over overlay (dark scrim + title only — buttons are HTML below) -->
 					{#if lost}
-						{@const fs  = Math.min(1, W * 0.11)}
-						{@const fs2 = fs * 0.55}
+						{@const fs = Math.min(1, W * 0.11)}
 						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.82)" />
-						<text x={W/2} y={H/2 - fs*0.6} text-anchor="middle" dominant-baseline="middle"
+						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
 							font-size={fs} font-weight="bold" fill="#ef4444">Game Over</text>
-						<text x={W/2} y={H/2 + fs*0.9} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs2} fill="rgb(148,163,184)">tap "Try Again" to restart</text>
 					{/if}
 				</svg>
+
+				<!-- HTML win button — rendered on top of the SVG scrim -->
+				{#if won}
+					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
+						<button
+							onclick={() => reset(false)}
+							class="pointer-events-auto px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
+							       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150"
+						>New Level</button>
+						<button
+							onclick={goToMenu}
+							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
+							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
+						>← Menu</button>
+					</div>
+				{/if}
+
+				<!-- HTML game-over buttons — rendered on top of the SVG scrim -->
+				{#if lost}
+					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
+						<button
+							onclick={() => reset(true)}
+							class="pointer-events-auto px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
+							       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
+						>↺ Try Again</button>
+						<button
+							onclick={goToMenu}
+							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
+							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
+						>← Menu</button>
+					</div>
+				{/if}
 			</div>
 		</div>
 	</main>

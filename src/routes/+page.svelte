@@ -70,10 +70,12 @@
 	let H = $state(9);
 
 	// Timing constants
-	const MS_PER_STEP = 90;
-	const NUDGE_FWD  = 140; // ms to nudge toward blocker
-	const NUDGE_BACK = 140; // ms to spring back
-	const FLASH_HALF = 90;  // ms per flash half (×4 = total flash duration)
+	const MS_PER_STEP   = 90;
+	const NUDGE_FWD     = 140; // ms to nudge toward blocker
+	const NUDGE_BACK    = 140; // ms to spring back
+	const FLASH_HALF    = 90;  // ms per flash half (×4 = total flash duration)
+	const EXIT_DURATION = 450; // ms — constant drain duration regardless of snake length
+	const EXIT_MIN_DUR  = 220; // ms — floor so a 1-cell snake at the edge isn't instant
 
 	const DIR_ROT: Record<Direction, number> = { E: 0, S: 90, W: 180, N: 270 };
 
@@ -89,6 +91,11 @@
 		startTime: number;
 		totalSteps?: number;
 		maxSteps?: number;
+		// drain animation (set when phase === 'exiting')
+		routeD?: string;     // SVG path string for the full route (tail → head → extension)
+		L_total?: number;    // total length of routeD in SVG units (cells)
+		L_snake?: number;    // length of just the snake portion = the visible "dash"
+		durationMs?: number; // total exit animation duration
 	}
 
 	const MAX_LIVES = 3;
@@ -101,6 +108,10 @@
 	let currentDifficulty = $state<string | null>(null); // label of the active difficulty
 	let winCounted        = false; // plain bool — not reactive; reset on new game
 	let rafId: number | null = null;
+
+	// SVG path refs for in-flight drain animations — keyed by arrow id.
+	// Used to call .getPointAtLength(...) for arrowhead positioning each frame.
+	let pathRefs = $state<Record<number, SVGPathElement | null>>({});
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
 
@@ -278,21 +289,61 @@
 		return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
 	}
 
-	function totalExitSteps(arrow: Arrow): number {
+	// Number of cells from the arrow's head to the grid boundary, in the exit direction.
+	// Equals 1 when the head is already on the edge row/column.
+	function exitCellCount(arrow: Arrow): number {
 		const h = arrow.path[0];
-		const edge =
-			arrow.direction === 'W' ? h.x + 1 :
-			arrow.direction === 'E' ? W - h.x :
-			arrow.direction === 'N' ? h.y + 1 : H - h.y;
-		return arrow.path.length + edge;
+		return arrow.direction === 'W' ? h.x + 1
+			:  arrow.direction === 'E' ? W - h.x
+			:  arrow.direction === 'N' ? h.y + 1
+			:                            H - h.y;
 	}
 
-	// ─── step position for all phases ────────────────────────────────────────────
+	// ─── drain animation: dasharray + dashoffset along an extended path ──────────
 
+	// Hidden singleton path used to measure SVG path lengths off-screen.
+	// (getTotalLength works on detached elements in Chrome/Safari, but Firefox
+	//  historically required attachment — so we keep one in a hidden <svg>.)
+	let _measurer: SVGPathElement | null = null;
+	function measurePath(d: string): number {
+		if (typeof document === 'undefined') return 0;
+		if (!_measurer) {
+			const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+			svg.setAttribute('width',  '0');
+			svg.setAttribute('height', '0');
+			svg.style.position      = 'absolute';
+			svg.style.visibility    = 'hidden';
+			svg.style.pointerEvents = 'none';
+			_measurer = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+			svg.appendChild(_measurer);
+			document.body.appendChild(svg);
+		}
+		_measurer.setAttribute('d', d);
+		return _measurer.getTotalLength();
+	}
+
+	// Build the full drain route: the snake's cells in TAIL → HEAD order,
+	// followed by enough extension cells in arrow.direction that the snake-
+	// length dash can fully slide off the grid.
+	function buildFullRoute(arrow: Arrow): string {
+		const dir = DELTA[arrow.direction];
+		const N   = arrow.path.length;
+		const extra = exitCellCount(arrow) + N + 2; // generous so dash exits cleanly
+
+		const pts: GridPos[] = [];
+		for (let i = N - 1; i >= 0; i--) pts.push(arrow.path[i]);
+		for (let k = 1; k <= extra; k++) {
+			pts.push({ x: arrow.path[0].x + k * dir.dx, y: arrow.path[0].y + k * dir.dy });
+		}
+		return roundedPath(pts, 0.4);
+	}
+
+	// ─── step position for blocked phases ────────────────────────────────────────
+
+	// The exiting phase no longer uses computeS — it's driven by elapsed/durationMs
+	// directly via stroke-dashoffset. Only the blocked nudge needs this.
 	function computeS(anim: Anim | undefined, elapsed: number): number {
 		if (!anim) return 0;
-		if (anim.phase === 'exiting')
-			return Math.min(elapsed / MS_PER_STEP, anim.totalSteps!);
 		if (anim.phase === 'blocked-fwd')
 			return easeOut(Math.min(elapsed / NUDGE_FWD, 1)) * (anim.maxSteps ?? 0);
 		if (anim.phase === 'blocked-back')
@@ -338,7 +389,25 @@
 		now = t;
 
 		if (!blocked) {
-			anims = { ...anims, [id]: { phase: 'exiting', startTime: t, totalSteps: totalExitSteps(arrow) } };
+			// Compute drain metadata up-front: build the extended route and
+			// measure both the full route and the snake-only portion so we know
+			// how far the dash needs to slide.
+			const exitCells = exitCellCount(arrow);
+			const routeD    = buildFullRoute(arrow);
+			const snakeD    = roundedPath([...arrow.path].reverse(), 0.4);
+			const L_total   = measurePath(routeD);
+			const L_snake   = measurePath(snakeD);
+			// Constant duration regardless of length — long snakes drain faster
+			// (visually whip out), short ones drain slower, but wall-clock time
+			// to clear is the same. EXIT_MIN_DUR keeps a 1-cell-at-edge snake
+			// from looking instant.
+			const totalTravel = L_snake + exitCells;
+			const durationMs  = Math.max(EXIT_MIN_DUR, EXIT_DURATION * Math.min(1, totalTravel / 4));
+
+			anims = { ...anims, [id]: {
+				phase: 'exiting', startTime: t,
+				routeD, L_total, L_snake, durationMs,
+			} };
 		} else {
 			anims = { ...anims, [id]: { phase: 'blocked-fwd', startTime: t, maxSteps: dist + 0.5 } };
 		}
@@ -359,9 +428,10 @@
 			const id = +sid;
 			const el = t - anim.startTime;
 
-			if (anim.phase === 'exiting' && el / MS_PER_STEP >= anim.totalSteps!) {
-				delete next[id]; nextRem.add(id); dirty = true;
-
+			if (anim.phase === 'exiting' && el >= (anim.durationMs ?? 0)) {
+				delete next[id]; nextRem.add(id);
+				delete pathRefs[id];
+				dirty = true;
 			} else if (anim.phase === 'blocked-fwd' && el >= NUDGE_FWD) {
 				next[id] = { phase: 'blocked-back', startTime: t, maxSteps: anim.maxSteps };
 				dirty = true;
@@ -731,31 +801,66 @@
 					{#each level.arrows as arrow (arrow.id)}
 						{#if !removed.has(arrow.id)}
 							{#if anims[arrow.id]}
-								<!-- Animating branch: recomputes every frame -->
 								{@const anim = anims[arrow.id]}
-								{@const d    = DELTA[arrow.direction]}
-								{@const el   = Math.max(0, now - anim.startTime)}
-								{@const s    = computeS(anim, el)}
-								{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
-								{@const head = pts[0]}
-								{@const red  = isFlashRed(anim, el)}
-								<g style="cursor:default;pointer-events:none">
-									<path
-										d={roundedPath(pts, roundedCorners ? 0.4 : 0)}
-										fill="none"
-										stroke={red ? '#ef4444' : arrow.color}
-										stroke-width={0.14}
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										opacity={0.9}
-									/>
-									<polygon
-										points="0.32,0 -0.16,-0.24 -0.16,0.24"
-										transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-										fill={red ? '#ef4444' : arrow.color}
-										opacity={0.95}
-									/>
-								</g>
+								{#if anim.phase === 'exiting'}
+									<!-- Drain animation: snake-length dash slides along extended route via stroke-dashoffset -->
+									{@const el       = Math.max(0, now - anim.startTime)}
+									{@const p        = Math.min(1, el / (anim.durationMs ?? 1))}
+									{@const travel   = (anim.L_total ?? 0) - (anim.L_snake ?? 0)}
+									{@const offset   = -p * travel}
+									{@const headLen  = Math.min(anim.L_total ?? 0, (anim.L_snake ?? 0) + p * travel)}
+									{@const ref      = pathRefs[arrow.id]}
+									{@const headPt   = ref ? ref.getPointAtLength(headLen)
+									                       : { x: arrow.path[0].x + 0.5, y: arrow.path[0].y + 0.5 }}
+									{@const aheadPt  = ref ? ref.getPointAtLength(Math.min(anim.L_total ?? 0, headLen + 0.1))
+									                       : { x: headPt.x + DELTA[arrow.direction].dx, y: headPt.y + DELTA[arrow.direction].dy }}
+									{@const angle    = Math.atan2(aheadPt.y - headPt.y, aheadPt.x - headPt.x) * 180 / Math.PI}
+									<g style="cursor:default;pointer-events:none">
+										<path
+											bind:this={pathRefs[arrow.id]}
+											d={anim.routeD}
+											fill="none"
+											stroke={arrow.color}
+											stroke-width={0.14}
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-dasharray="{anim.L_snake} {anim.L_total}"
+											stroke-dashoffset={offset}
+											opacity={0.9}
+										/>
+										<polygon
+											points="0.32,0 -0.16,-0.24 -0.16,0.24"
+											transform="translate({headPt.x},{headPt.y}) rotate({angle})"
+											fill={arrow.color}
+											opacity={0.95}
+										/>
+									</g>
+								{:else}
+									<!-- Blocked phases: rigid-body nudge / bounce / flash -->
+									{@const d    = DELTA[arrow.direction]}
+									{@const el   = Math.max(0, now - anim.startTime)}
+									{@const s    = computeS(anim, el)}
+									{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
+									{@const head = pts[0]}
+									{@const red  = isFlashRed(anim, el)}
+									<g style="cursor:default;pointer-events:none">
+										<path
+											d={roundedPath(pts, 0.4)}
+											fill="none"
+											stroke={red ? '#ef4444' : arrow.color}
+											stroke-width={0.14}
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											opacity={0.9}
+										/>
+										<polygon
+											points="0.32,0 -0.16,-0.24 -0.16,0.24"
+											transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
+											fill={red ? '#ef4444' : arrow.color}
+											opacity={0.95}
+										/>
+									</g>
+								{/if}
 							{:else}
 								<!-- Static branch: pre-computed paths, zero per-frame cost -->
 								{@const sd = staticArrowData[arrow.id]}

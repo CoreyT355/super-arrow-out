@@ -452,6 +452,10 @@
 								onclick={() => handleClick(arrow.id)}
 								style={anim ? 'cursor:default;pointer-events:none' : 'cursor:pointer'}
 							>
+								<!-- Full-tile hit areas so any tap on a snake cell registers -->
+								{#each arrow.path as seg}
+									<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
+								{/each}
 								<path
 									d={roundedPath(pts, 0.4)}
 									fill="none"

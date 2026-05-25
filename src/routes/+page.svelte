@@ -102,6 +102,7 @@
 
 	let level             = $state(generateLevel(9, 9));
 	let removed           = $state(new Set<number>());
+	let markedRed         = $state(new Set<number>());
 	let anims             = $state<Record<number, Anim>>({});
 	let now               = $state(performance.now());
 	let lives             = $state(MAX_LIVES);
@@ -335,7 +336,7 @@
 		for (let k = 1; k <= extra; k++) {
 			pts.push({ x: arrow.path[0].x + k * dir.dx, y: arrow.path[0].y + k * dir.dy });
 		}
-		return roundedPath(pts, 0.4);
+		return roundedPath(pts, roundedCorners ? 0.4 : 0);
 	}
 
 	// ─── step position for blocked phases ────────────────────────────────────────
@@ -394,7 +395,7 @@
 			// how far the dash needs to slide.
 			const exitCells = exitCellCount(arrow);
 			const routeD    = buildFullRoute(arrow);
-			const snakeD    = roundedPath([...arrow.path].reverse(), 0.4);
+			const snakeD    = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
 			const L_total   = measurePath(routeD);
 			const L_snake   = measurePath(snakeD);
 			// Constant duration regardless of length — long snakes drain faster
@@ -442,7 +443,9 @@
 				dirty = true;
 
 			} else if (anim.phase === 'blocked-flash' && el >= FLASH_HALF * 4) {
-				delete next[id]; dirty = true;
+				delete next[id];
+				markedRed = new Set([...markedRed, id]);
+				dirty = true;
 			}
 		}
 
@@ -459,6 +462,7 @@
 		const { w, h } = computeGridSize(cells, square);
 		W = w; H = h;
 		removed           = new Set();
+		markedRed         = new Set();
 		anims             = {};
 		lives             = MAX_LIVES;
 		menuOpen          = false;
@@ -475,6 +479,7 @@
 	function reset(reuse = false) {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		removed    = new Set();
+		markedRed  = new Set();
 		anims      = {};
 		lives      = MAX_LIVES;
 		winCounted = false;
@@ -489,9 +494,10 @@
 
 	function goToMenu() {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-		removed  = new Set();
-		anims    = {};
-		menuOpen = false;
+		removed   = new Set();
+		markedRed = new Set();
+		anims     = {};
+		menuOpen  = false;
 		resetView();
 		gameState = 'menu';
 	}
@@ -845,7 +851,7 @@
 									{@const red  = isFlashRed(anim, el)}
 									<g style="cursor:default;pointer-events:none">
 										<path
-											d={roundedPath(pts, 0.4)}
+											d={roundedPath(pts, roundedCorners ? 0.4 : 0)}
 											fill="none"
 											stroke={red ? '#ef4444' : arrow.color}
 											stroke-width={0.14}
@@ -863,7 +869,9 @@
 								{/if}
 							{:else}
 								<!-- Static branch: pre-computed paths, zero per-frame cost -->
-								{@const sd = staticArrowData[arrow.id]}
+								{@const sd       = staticArrowData[arrow.id]}
+								{@const penalized = markedRed.has(arrow.id)}
+								{@const drawColor = penalized ? '#b91c1c' : arrow.color}
 								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer">
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
@@ -871,7 +879,7 @@
 									<path
 										d={sd.d}
 										fill="none"
-										stroke={arrow.color}
+										stroke={drawColor}
 										stroke-width={0.14}
 										stroke-linecap="round"
 										stroke-linejoin="round"
@@ -880,7 +888,7 @@
 									<polygon
 										points="0.32,0 -0.16,-0.24 -0.16,0.24"
 										transform="translate({sd.head.x + 0.5},{sd.head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-										fill={arrow.color}
+										fill={drawColor}
 										opacity={0.95}
 									/>
 								</g>

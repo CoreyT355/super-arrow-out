@@ -256,16 +256,16 @@
 									points={pts.map(p => `${p.x + 0.5},${p.y + 0.5}`).join(' ')}
 									fill="none"
 									stroke={red ? '#ef4444' : arrow.color}
-									stroke-width={0.72}
+									stroke-width={0.28}
 									stroke-linecap="round"
 									stroke-linejoin="round"
-									opacity={0.82}
+									opacity={0.9}
 								/>
 								<polygon
-									points="0.24,0 -0.1,-0.15 -0.1,0.15"
+									points="0.32,0 -0.16,-0.24 -0.16,0.24"
 									transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-									fill="white"
-									opacity={0.9}
+									fill={red ? '#ef4444' : arrow.color}
+									opacity={0.95}
 								/>
 							</g>
 						{/if}

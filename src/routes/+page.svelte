@@ -289,10 +289,16 @@
 
 	// ─── step position for all phases ────────────────────────────────────────────
 
+	// Add this near your timing constants at the top
+	const TOTAL_EXIT_DURATION_MS = 750; // Time it takes for ANY arrow to clear completely (tweak as desired)
+
 	function computeS(anim: Anim | undefined, elapsed: number): number {
 		if (!anim) return 0;
-		if (anim.phase === 'exiting')
-			return Math.min(elapsed / MS_PER_STEP, anim.totalSteps!);
+		if (anim.phase === 'exiting') {
+			// Linear interpolation: scale steps dynamically over a fixed time slice
+			const progress = Math.min(elapsed / TOTAL_EXIT_DURATION_MS, 1);
+			return progress * anim.totalSteps!;
+		}
 		if (anim.phase === 'blocked-fwd')
 			return easeOut(Math.min(elapsed / NUDGE_FWD, 1)) * (anim.maxSteps ?? 0);
 		if (anim.phase === 'blocked-back')
@@ -359,9 +365,8 @@
 			const id = +sid;
 			const el = t - anim.startTime;
 
-			if (anim.phase === 'exiting' && el / MS_PER_STEP >= anim.totalSteps!) {
+			if (anim.phase === 'exiting' && el >= TOTAL_EXIT_DURATION_MS) {
 				delete next[id]; nextRem.add(id); dirty = true;
-
 			} else if (anim.phase === 'blocked-fwd' && el >= NUDGE_FWD) {
 				next[id] = { phase: 'blocked-back', startTime: t, maxSteps: anim.maxSteps };
 				dirty = true;

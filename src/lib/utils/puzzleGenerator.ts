@@ -229,16 +229,26 @@ function absorbShortArrows(arrows: Arrow[], minLen: number): Arrow[] {
 
 export function generateLevel(
 	width = 9,
-	height = 9,
-	minLength = 5,
-	maxLength = 10,
-	changeDirChance = 0.3
+	height = 9
 ): Level {
 	const grid = makeGrid(width, height);
 	const arrows: Arrow[] = [];
 	let id = 0;
 	let consecutiveFails = 0;
-	const MIN_ARROW_LEN = 3;
+	
+	// 1. Establish size baseline using the restrictive axis (the height)
+    const shortDimension = Math.min(width, height);
+
+    // 2. Dynamically scale the boundaries based on your tier thresholds
+    const minLength = Math.max(4, Math.floor(shortDimension * 0.5));
+    const maxLength = Math.max(7, Math.floor(shortDimension * 1.2));
+    
+    // Scale the safety net so stubs grow relative to map size (capped gracefully)
+    const MIN_ARROW_LEN = Math.max(3, Math.floor(shortDimension * 0.25));
+
+	// 3. Scale Direction Change Chance
+    // Starts at ~0.40 for Easy, smoothly drops down to ~0.12 for Expert
+    const changeDirChance = Math.max(0.1, 0.45 - (shortDimension * 0.007));
 
 	const maxFails = width * height * 2; // scale with grid size
 	while (!allOccupied(grid, width, height) && consecutiveFails < maxFails) {

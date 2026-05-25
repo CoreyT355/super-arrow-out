@@ -235,7 +235,8 @@ export function generateLevel(
 	let consecutiveFails = 0;
 	const MIN_ARROW_LEN = 3;
 
-	while (!allOccupied(grid, width, height) && consecutiveFails < 400) {
+	const maxFails = width * height * 2; // scale with grid size
+	while (!allOccupied(grid, width, height) && consecutiveFails < maxFails) {
 		const arrow = generateArrow(grid, id, width, height, minLength, maxLength, changeDirChance);
 
 		if (arrow) {

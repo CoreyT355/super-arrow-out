@@ -29,9 +29,10 @@
 		return `${w} × ${h} grid`;
 	}
 
-	// ─── local-storage progress ─────────────────────────────────────────────────
+	// ─── local-storage helpers ──────────────────────────────────────────────────
 
-	const STORAGE_KEY = 'arrow-out-progress';
+	const STORAGE_KEY  = 'arrow-out-progress';
+	const PUZZLE_KEY   = 'arrow-out-puzzle';
 
 	// Returns {} on server (SSR) or on parse error.
 	function loadProgress(): Record<string, number> {
@@ -43,6 +44,20 @@
 	function saveProgress(p: Record<string, number>) {
 		if (typeof window === 'undefined') return;
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+	}
+
+	// Persist the current puzzle so "Try Again" can restore the exact same layout.
+	function savePuzzle(lvl: typeof level) {
+		if (typeof window === 'undefined') return;
+		try { localStorage.setItem(PUZZLE_KEY, JSON.stringify(lvl)); } catch {}
+	}
+
+	function loadPuzzle(): typeof level | null {
+		if (typeof window === 'undefined') return null;
+		try {
+			const raw = localStorage.getItem(PUZZLE_KEY);
+			return raw ? JSON.parse(raw) : null;
+		} catch { return null; }
 	}
 
 	// Initialise from storage immediately on the client (guard keeps SSR safe).
@@ -380,17 +395,25 @@
 		winCounted        = false;
 		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
 		level             = generateLevel(w, h);
+		savePuzzle(level);
 		resetView();
 		gameState = 'playing';
 	}
 
-	function reset() {
+	// reuse=true  → restore the saved puzzle (Try Again after game-over)
+	// reuse=false → generate a fresh puzzle and save it (Regenerate)
+	function reset(reuse = false) {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		removed    = new Set();
 		anims      = {};
 		lives      = MAX_LIVES;
 		winCounted = false;
-		level      = generateLevel(W, H);
+		if (reuse) {
+			level = loadPuzzle() ?? generateLevel(W, H);
+		} else {
+			level = generateLevel(W, H);
+			savePuzzle(level);
+		}
 		resetView();
 	}
 
@@ -615,7 +638,7 @@
 					       hover:bg-slate-700 hover:text-slate-200 transition-colors"
 				>← Menu</button>
 				<button
-					onclick={reset}
+					onclick={() => reset(lost)}
 					class="px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors
 					       {lost
 					           ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
@@ -650,7 +673,7 @@
 						class="flex-1 py-2.5 text-sm font-medium rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
 					>← Menu</button>
 					<button
-						onclick={() => { reset(); menuOpen = false; }}
+						onclick={() => { reset(lost); menuOpen = false; }}
 						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors
 						       {lost
 						           ? 'bg-red-600 text-white hover:bg-red-500'

@@ -372,6 +372,16 @@
 
 	let showGrid = $state(true);
 
+	// Pre-compute SVG path strings and head positions for every arrow at s=0.
+	// These are used by the static (non-animating) render branch so idle arrows
+	// never re-render during RAF ticks — only arrows with an active anim do.
+	const staticArrowData = $derived(
+		Object.fromEntries(level.arrows.map(arrow => [
+			arrow.id,
+			{ d: roundedPath(arrow.path, 0.4), head: arrow.path[0] },
+		]))
+	);
+
 	const won = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
 </script>
 
@@ -425,70 +435,94 @@
 					style="width:100%;height:100%;transform:translate({panX}px,{panY}px) scale({scale});transform-origin:0 0;"
 					overflow="hidden"
 				>
-					<!-- empty cell backgrounds -->
+					<!-- Grid background: one SVG pattern instead of W×H individual rects -->
+					<defs>
+						<pattern id="cell-bg" x="0" y="0" width="1" height="1" patternUnits="userSpaceOnUse">
+							<rect x="0.06" y="0.06" width="0.88" height="0.88" rx="0.18" fill="rgba(51,65,85,0.6)" />
+						</pattern>
+					</defs>
 					{#if showGrid}
-						{#each Array(H) as _, row}
-							{#each Array(W) as _, col}
-								<rect
-									x={col + 0.06} y={row + 0.06}
-									width={0.88} height={0.88} rx={0.18}
-									class="fill-slate-700/60"
-								/>
-							{/each}
-						{/each}
+						<rect x="-0.1" y="-0.1" width={W + 0.2} height={H + 0.2} fill="url(#cell-bg)" />
 					{/if}
 
 					<!-- arrows -->
+					<!--
+						Split into two branches per arrow:
+						  static  — uses pre-computed path strings, never reads `now`, never
+						            re-renders during RAF ticks (the common case: 400+ idle arrows)
+						  animating — reads `now` and recomputes every frame (only 1–2 at a time)
+					-->
 					{#each level.arrows as arrow (arrow.id)}
 						{#if !removed.has(arrow.id)}
-							{@const anim = anims[arrow.id]}
-							{@const d    = DELTA[arrow.direction]}
-							{@const el   = anim ? Math.max(0, now - anim.startTime) : 0}
-							{@const s    = computeS(anim, el)}
-							{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
-							{@const head = pts[0]}
-							{@const red  = anim ? isFlashRed(anim, el) : false}
-							<g
-								onclick={() => handleClick(arrow.id)}
-								style={anim ? 'cursor:default;pointer-events:none' : 'cursor:pointer'}
-							>
-								<!-- Full-tile hit areas so any tap on a snake cell registers -->
-								{#each arrow.path as seg}
-									<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
-								{/each}
-								<path
-									d={roundedPath(pts, 0.4)}
-									fill="none"
-									stroke={red ? '#ef4444' : arrow.color}
-									stroke-width={0.14}
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									opacity={0.9}
-								/>
-								<polygon
-									points="0.32,0 -0.16,-0.24 -0.16,0.24"
-									transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-									fill={red ? '#ef4444' : arrow.color}
-									opacity={0.95}
-								/>
-							</g>
+							{#if anims[arrow.id]}
+								<!-- Animating branch: re-renders every RAF frame -->
+								{@const anim = anims[arrow.id]}
+								{@const d    = DELTA[arrow.direction]}
+								{@const el   = Math.max(0, now - anim.startTime)}
+								{@const s    = computeS(anim, el)}
+								{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
+								{@const head = pts[0]}
+								{@const red  = isFlashRed(anim, el)}
+								<g style="cursor:default;pointer-events:none">
+									<path
+										d={roundedPath(pts, 0.4)}
+										fill="none"
+										stroke={red ? '#ef4444' : arrow.color}
+										stroke-width={0.14}
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										opacity={0.9}
+									/>
+									<polygon
+										points="0.32,0 -0.16,-0.24 -0.16,0.24"
+										transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
+										fill={red ? '#ef4444' : arrow.color}
+										opacity={0.95}
+									/>
+								</g>
+							{:else}
+								<!-- Static branch: pre-computed paths, zero per-frame cost -->
+								{@const sd = staticArrowData[arrow.id]}
+								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer">
+									{#each arrow.path as seg}
+										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
+									{/each}
+									<path
+										d={sd.d}
+										fill="none"
+										stroke={arrow.color}
+										stroke-width={0.14}
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										opacity={0.9}
+									/>
+									<polygon
+										points="0.32,0 -0.16,-0.24 -0.16,0.24"
+										transform="translate({sd.head.x + 0.5},{sd.head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
+										fill={arrow.color}
+										opacity={0.95}
+									/>
+								</g>
+							{/if}
 						{/if}
 					{/each}
 
 					<!-- win overlay -->
 					{#if won}
+						{@const fs  = Math.min(1, W * 0.11)}
+						{@const fs2 = fs * 0.55}
 						<rect x="-0.1" y="-0.1" width={W + 0.2} height={H + 0.2} fill="rgba(15,23,42,0.75)" />
 						<text
-							x={W / 2} y={H / 2 - 0.5}
+							x={W / 2} y={H / 2 - fs * 0.6}
 							text-anchor="middle" dominant-baseline="middle"
-							font-size={1} font-weight="bold" fill="white" letter-spacing="0.05"
+							font-size={fs} font-weight="bold" fill="white"
 						>
 							Level Complete
 						</text>
 						<text
-							x={W / 2} y={H / 2 + 0.7}
+							x={W / 2} y={H / 2 + fs * 0.9}
 							text-anchor="middle" dominant-baseline="middle"
-							font-size={0.55} fill="rgb(148,163,184)"
+							font-size={fs2} fill="rgb(148,163,184)"
 						>
 							tap regenerate to play again
 						</text>

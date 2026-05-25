@@ -6,11 +6,11 @@
 
 	// cells: target cell count for adaptive grids; square: always use equal W/H
 	const DIFFICULTIES = [
-		{ label: 'Easy',       cells:   36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400' },
-		{ label: 'Normal',     cells:   81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400'     },
-		{ label: 'Hard',       cells:  256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400'  },
-		{ label: 'Super Hard', cells: 1024, square: false, color: 'from-orange-500 to-orange-600',  ring: 'ring-orange-400'  },
-		{ label: 'Expert',     cells: 4096, square: false, color: 'from-rose-600 to-rose-700',      ring: 'ring-rose-400'    },
+		{ label: 'Easy',       cells:   36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400', chartColor: '#10b981' },
+		{ label: 'Normal',     cells:   81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400',     chartColor: '#0ea5e9' },
+		{ label: 'Hard',       cells:  256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6' },
+		{ label: 'Super Hard', cells: 1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316' },
+		{ label: 'Expert',     cells: 4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48' },
 	];
 
 	// Compute W × H for a difficulty, fitting the current viewport aspect ratio.
@@ -29,17 +29,51 @@
 		return `${w} × ${h} grid`;
 	}
 
+	// ─── local-storage helpers ──────────────────────────────────────────────────
+
+	const STORAGE_KEY  = 'arrow-out-progress';
+	const PUZZLE_KEY   = 'arrow-out-puzzle';
+
+	// Returns {} on server (SSR) or on parse error.
+	function loadProgress(): Record<string, number> {
+		if (typeof window === 'undefined') return {};
+		try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}'); }
+		catch { return {}; }
+	}
+
+	function saveProgress(p: Record<string, number>) {
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+	}
+
+	// Persist the current puzzle so "Try Again" can restore the exact same layout.
+	function savePuzzle(lvl: typeof level) {
+		if (typeof window === 'undefined') return;
+		try { localStorage.setItem(PUZZLE_KEY, JSON.stringify(lvl)); } catch {}
+	}
+
+	function loadPuzzle(): typeof level | null {
+		if (typeof window === 'undefined') return null;
+		try {
+			const raw = localStorage.getItem(PUZZLE_KEY);
+			return raw ? JSON.parse(raw) : null;
+		} catch { return null; }
+	}
+
+	// Initialise from storage immediately on the client (guard keeps SSR safe).
+	let progress = $state<Record<string, number>>(loadProgress());
+
 	// ─── game state ──────────────────────────────────────────────────────────────
 
-	let gameState = $state<'menu' | 'playing'>('menu');
+	let gameState = $state<'menu' | 'playing' | 'stats'>('menu');
 	let W = $state(9);
 	let H = $state(9);
 
 	// Timing constants
 	const MS_PER_STEP = 90;
-	const NUDGE_FWD  = 260;
-	const NUDGE_BACK = 280;
-	const FLASH_HALF = 130;
+	const NUDGE_FWD  = 140; // ms to nudge toward blocker
+	const NUDGE_BACK = 140; // ms to spring back
+	const FLASH_HALF = 90;  // ms per flash half (×4 = total flash duration)
 
 	const DIR_ROT: Record<Direction, number> = { E: 0, S: 90, W: 180, N: 270 };
 
@@ -59,11 +93,13 @@
 
 	const MAX_LIVES = 3;
 
-	let level   = $state(generateLevel(9, 9));
-	let removed = $state(new Set<number>());
-	let anims   = $state<Record<number, Anim>>({});
-	let now     = $state(performance.now());
-	let lives   = $state(MAX_LIVES);
+	let level             = $state(generateLevel(9, 9));
+	let removed           = $state(new Set<number>());
+	let anims             = $state<Record<number, Anim>>({});
+	let now               = $state(performance.now());
+	let lives             = $state(MAX_LIVES);
+	let currentDifficulty = $state<string | null>(null); // label of the active difficulty
+	let winCounted        = false; // plain bool — not reactive; reset on new game
 	let rafId: number | null = null;
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
@@ -352,21 +388,32 @@
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		const { w, h } = computeGridSize(cells, square);
 		W = w; H = h;
-		removed  = new Set();
-		anims    = {};
-		lives    = MAX_LIVES;
-		menuOpen = false;
-		level    = generateLevel(w, h);
+		removed           = new Set();
+		anims             = {};
+		lives             = MAX_LIVES;
+		menuOpen          = false;
+		winCounted        = false;
+		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
+		level             = generateLevel(w, h);
+		savePuzzle(level);
 		resetView();
 		gameState = 'playing';
 	}
 
-	function reset() {
+	// reuse=true  → restore the saved puzzle (Try Again after game-over)
+	// reuse=false → generate a fresh puzzle and save it (Regenerate)
+	function reset(reuse = false) {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-		removed = new Set();
-		anims   = {};
-		lives   = MAX_LIVES;
-		level   = generateLevel(W, H);
+		removed    = new Set();
+		anims      = {};
+		lives      = MAX_LIVES;
+		winCounted = false;
+		if (reuse) {
+			level = loadPuzzle() ?? generateLevel(W, H);
+		} else {
+			level = generateLevel(W, H);
+			savePuzzle(level);
+		}
 		resetView();
 	}
 
@@ -378,6 +425,33 @@
 		resetView();
 		gameState = 'menu';
 	}
+
+	function goToStats() { gameState = 'stats'; }
+
+	// ─── chart data ──────────────────────────────────────────────────────────────
+
+	// Pre-compute donut segments from win counts.
+	// Each segment has: startAngle (deg, 0 = top), dash (px along circumference).
+	const DONUT_R = 65;
+	const DONUT_C = 2 * Math.PI * DONUT_R;
+	const DONUT_GAP = 2; // px gap cut from each segment's leading edge
+
+	const chartSegments = $derived(
+		(() => {
+			const total = DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0);
+			let cumFrac = 0;
+			return DIFFICULTIES.map(d => {
+				const count  = progress[d.label] ?? 0;
+				const frac   = total > 0 ? count / total : 0;
+				const angle  = cumFrac * 360 - 90; // -90° → start segment at 12 o'clock
+				const dash   = Math.max(0, frac * DONUT_C - DONUT_GAP);
+				cumFrac += frac;
+				return { ...d, count, frac, total, angle, dash };
+			});
+		})()
+	);
+
+	const totalWins = $derived(DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
 
 	let showGrid  = $state(true);
 	let menuOpen  = $state(false);
@@ -394,6 +468,17 @@
 
 	const won  = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
 	const lost = $derived(lives <= 0 && !won);
+
+	// Record a completion when the player clears the board.
+	// winCounted is a plain bool (not reactive) so this fires exactly once per game.
+	$effect(() => {
+		if (won && !winCounted && currentDifficulty !== null) {
+			winCounted = true;
+			const next = { ...progress, [currentDifficulty]: (progress[currentDifficulty] ?? 0) + 1 };
+			progress = next;
+			saveProgress(next);
+		}
+	});
 </script>
 
 {#if gameState === 'menu'}
@@ -406,16 +491,112 @@
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
 			{#each DIFFICULTIES as d}
+				{@const count = progress[d.label] ?? 0}
 				<button
 					onclick={() => startGame(d.cells, d.square)}
-					class="group relative flex flex-col items-center py-4 px-6 rounded-2xl bg-gradient-to-br {d.color}
+					class="group relative flex items-center py-4 px-5 rounded-2xl bg-gradient-to-br {d.color}
 					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
 					       ring-2 ring-transparent hover:{d.ring} focus-visible:{d.ring} focus-visible:outline-none"
 				>
-					<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
-					<span class="text-white/70 text-sm mt-0.5">{gridCaption(d.cells, d.square)}</span>
+					<!-- Label + grid size -->
+					<div class="flex flex-col items-start flex-1 min-w-0">
+						<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
+						<span class="text-white/70 text-sm">{gridCaption(d.cells, d.square)}</span>
+					</div>
+					<!-- Completion count badge -->
+					<div class="flex flex-col items-center justify-center ml-3 shrink-0 min-w-[3rem]">
+						{#if count > 0}
+							<span class="text-2xl font-extrabold text-white leading-none">{count}</span>
+							<span class="text-white/60 text-[10px] uppercase tracking-widest mt-0.5">
+								{count === 1 ? 'win' : 'wins'}
+							</span>
+						{:else}
+							<span class="text-white/30 text-xs">—</span>
+						{/if}
+					</div>
 				</button>
 			{/each}
+		</div>
+
+		<button
+			onclick={goToStats}
+			class="text-slate-500 hover:text-slate-300 text-sm transition-colors mt-2 flex items-center gap-1.5"
+		>
+			<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+				<rect x="1" y="7" width="3" height="6" rx="0.5"/>
+				<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
+				<rect x="10" y="1" width="3" height="12" rx="0.5"/>
+			</svg>
+			Stats
+		</button>
+	</main>
+
+{:else if gameState === 'stats'}
+	<!-- Stats screen -->
+	<main class="w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
+
+		<!-- Top bar -->
+		<div class="h-12 shrink-0 flex items-center px-4 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm">
+			<button
+				onclick={goToMenu}
+				class="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60
+				       hover:bg-slate-700 hover:text-slate-200 transition-colors"
+			>← Back</button>
+			<span class="flex-1 text-center text-white font-bold tracking-wide">Stats</span>
+			<div class="w-[4.5rem]"></div>
+		</div>
+
+		<!-- Scrollable content -->
+		<div class="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-8 px-6 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+
+			<!-- Donut chart -->
+			<svg viewBox="0 0 200 200" width="220" height="220" style="overflow:visible">
+				<!-- Background ring -->
+				<circle cx="100" cy="100" r={DONUT_R} fill="none" stroke="rgba(51,65,85,0.5)" stroke-width="28" />
+
+				{#if totalWins > 0}
+					{#each chartSegments as seg}
+						{#if seg.frac > 0}
+							<circle
+								cx="100" cy="100" r={DONUT_R}
+								fill="none"
+								stroke={seg.chartColor}
+								stroke-width="28"
+								stroke-dasharray="{seg.dash} {DONUT_C}"
+								transform="rotate({seg.angle}, 100, 100)"
+								stroke-linecap="butt"
+							/>
+						{/if}
+					{/each}
+				{/if}
+
+				<!-- Centre label -->
+				{#if totalWins === 0}
+					<text x="100" y="100" text-anchor="middle" dominant-baseline="middle"
+						font-size="13" fill="rgb(100,116,139)">No wins yet</text>
+				{:else}
+					<text x="100" y="90" text-anchor="middle" dominant-baseline="middle"
+						font-size="36" font-weight="800" fill="white">{totalWins}</text>
+					<text x="100" y="116" text-anchor="middle" dominant-baseline="middle"
+						font-size="12" fill="rgb(100,116,139)" letter-spacing="1">
+						{totalWins === 1 ? 'TOTAL WIN' : 'TOTAL WINS'}
+					</text>
+				{/if}
+			</svg>
+
+			<!-- Breakdown legend -->
+			<div class="w-full max-w-xs flex flex-col divide-y divide-slate-800/60">
+				{#each chartSegments as seg}
+					<div class="flex items-center gap-3 py-3">
+						<div class="w-3 h-3 rounded-full shrink-0" style="background:{seg.chartColor}"></div>
+						<span class="text-slate-300 flex-1 text-sm font-medium">{seg.label}</span>
+						<span class="text-white font-bold tabular-nums w-8 text-right">{seg.count}</span>
+						<span class="text-slate-500 text-sm tabular-nums w-10 text-right">
+							{seg.total > 0 ? Math.round(seg.frac * 100) : 0}%
+						</span>
+					</div>
+				{/each}
+			</div>
 		</div>
 	</main>
 
@@ -457,7 +638,7 @@
 					       hover:bg-slate-700 hover:text-slate-200 transition-colors"
 				>← Menu</button>
 				<button
-					onclick={reset}
+					onclick={() => reset(lost)}
 					class="px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors
 					       {lost
 					           ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
@@ -492,7 +673,7 @@
 						class="flex-1 py-2.5 text-sm font-medium rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
 					>← Menu</button>
 					<button
-						onclick={() => { reset(); menuOpen = false; }}
+						onclick={() => { reset(lost); menuOpen = false; }}
 						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors
 						       {lost
 						           ? 'bg-red-600 text-white hover:bg-red-500'
@@ -516,7 +697,7 @@
 		<div class="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
 			<div
 				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem) * {W / H})); aspect-ratio: {W} / {H};"
-				class="overflow-hidden rounded-xl touch-none"
+				class="relative overflow-hidden rounded-xl touch-none"
 				use:panZoomAction
 			>
 				<svg
@@ -593,28 +774,54 @@
 						{/if}
 					{/each}
 
-					<!-- Win overlay -->
+					<!-- Win overlay (dark scrim + title only — button is HTML below) -->
 					{#if won}
-						{@const fs  = Math.min(1, W * 0.11)}
-						{@const fs2 = fs * 0.55}
+						{@const fs = Math.min(1, W * 0.11)}
 						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.75)" />
-						<text x={W/2} y={H/2 - fs*0.6} text-anchor="middle" dominant-baseline="middle"
+						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
 							font-size={fs} font-weight="bold" fill="white">Level Complete</text>
-						<text x={W/2} y={H/2 + fs*0.9} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs2} fill="rgb(148,163,184)">tap Regenerate to play again</text>
 					{/if}
 
-					<!-- Game over overlay -->
+					<!-- Game over overlay (dark scrim + title only — buttons are HTML below) -->
 					{#if lost}
-						{@const fs  = Math.min(1, W * 0.11)}
-						{@const fs2 = fs * 0.55}
+						{@const fs = Math.min(1, W * 0.11)}
 						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.82)" />
-						<text x={W/2} y={H/2 - fs*0.6} text-anchor="middle" dominant-baseline="middle"
+						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
 							font-size={fs} font-weight="bold" fill="#ef4444">Game Over</text>
-						<text x={W/2} y={H/2 + fs*0.9} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs2} fill="rgb(148,163,184)">tap "Try Again" to restart</text>
 					{/if}
 				</svg>
+
+				<!-- HTML win button — rendered on top of the SVG scrim -->
+				{#if won}
+					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
+						<button
+							onclick={() => reset(false)}
+							class="pointer-events-auto px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
+							       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150"
+						>New Level</button>
+						<button
+							onclick={goToMenu}
+							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
+							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
+						>← Menu</button>
+					</div>
+				{/if}
+
+				<!-- HTML game-over buttons — rendered on top of the SVG scrim -->
+				{#if lost}
+					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
+						<button
+							onclick={() => reset(true)}
+							class="pointer-events-auto px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
+							       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
+						>↺ Try Again</button>
+						<button
+							onclick={goToMenu}
+							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
+							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
+						>← Menu</button>
+					</div>
+				{/if}
 			</div>
 		</div>
 	</main>

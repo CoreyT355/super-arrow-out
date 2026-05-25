@@ -147,12 +147,17 @@ function generateArrow(
 
 		let next: GridPos;
 		if (hasPreferred) {
-			if (Math.random() < changeDirChance && neighbors.length > 1) {
+			if (i > 0 && Math.random() < changeDirChance && neighbors.length > 1) {
 				const others = neighbors.filter(p => !(p.x === preferred.x && p.y === preferred.y));
 				next = others[Math.floor(Math.random() * others.length)];
 			} else {
 				next = preferred;
 			}
+		} else if (i === 0) {
+			// Inward cell is blocked on the very first step — undo and reject so the
+			// caller tries a different starting position. Never leave a misaligned head.
+			grid[ey][ex] = 'empty';
+			return null;
 		} else {
 			next = neighbors[Math.floor(Math.random() * neighbors.length)];
 		}

@@ -352,10 +352,11 @@
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		const { w, h } = computeGridSize(cells, square);
 		W = w; H = h;
-		removed = new Set();
-		anims   = {};
-		lives   = MAX_LIVES;
-		level   = generateLevel(w, h);
+		removed  = new Set();
+		anims    = {};
+		lives    = MAX_LIVES;
+		menuOpen = false;
+		level    = generateLevel(w, h);
 		resetView();
 		gameState = 'playing';
 	}
@@ -371,13 +372,15 @@
 
 	function goToMenu() {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-		removed   = new Set();
-		anims     = {};
+		removed  = new Set();
+		anims    = {};
+		menuOpen = false;
 		resetView();
 		gameState = 'menu';
 	}
 
-	let showGrid = $state(true);
+	let showGrid  = $state(true);
+	let menuOpen  = $state(false);
 
 	// Pre-compute SVG path strings and head positions for every arrow at s=0.
 	// These are used by the static (non-animating) render branch so idle arrows
@@ -418,33 +421,101 @@
 
 {:else}
 	<!-- ─── Game screen ──────────────────────────────────────────────────────── -->
-	<!--
-		h-dvh     → dynamic viewport height: shrinks when browser chrome appears (mobile)
-		pb-safe   → padding-bottom: env(safe-area-inset-bottom) for notched phones
-	-->
-	<main class="w-full h-dvh bg-slate-900 flex flex-col items-center justify-center gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-		<!-- Lives display -->
-		<div class="flex items-center justify-center gap-2 mb-1">
-			{#each Array(MAX_LIVES) as _, i}
-				<span
-					class="text-2xl transition-all duration-300 {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.7)]' : 'text-slate-700'}"
-					style="line-height:1"
-				>♥</span>
-			{/each}
+	<main class="w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
+
+		<!-- ── Top bar ──────────────────────────────────────────────────────────── -->
+		<!-- h-12 = 3rem fixed; shrink-0 prevents flex from squishing it -->
+		<div class="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm">
+
+			<!-- Mobile: hamburger button -->
+			<button
+				class="sm:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 text-slate-400
+				       hover:bg-slate-700 hover:text-white transition-colors active:scale-95"
+				onclick={() => (menuOpen = !menuOpen)}
+				aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+			>
+				{#if menuOpen}
+					<!-- × close icon -->
+					<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+						<line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
+					</svg>
+				{:else}
+					<!-- ☰ hamburger icon -->
+					<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+						<line x1="2" y1="4.5" x2="14" y2="4.5"/>
+						<line x1="2" y1="8"   x2="14" y2="8"/>
+						<line x1="2" y1="11.5" x2="14" y2="11.5"/>
+					</svg>
+				{/if}
+			</button>
+
+			<!-- Desktop: inline controls -->
+			<div class="hidden sm:flex items-center gap-2">
+				<button
+					onclick={goToMenu}
+					class="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60
+					       hover:bg-slate-700 hover:text-slate-200 transition-colors"
+				>← Menu</button>
+				<button
+					onclick={reset}
+					class="px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors
+					       {lost
+					           ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
+					           : 'bg-slate-800 text-slate-300 border-slate-700/60 hover:bg-slate-700'}"
+				>{lost ? '↺ Try Again' : 'Regenerate'}</button>
+				<label class="flex items-center gap-1.5 cursor-pointer select-none text-slate-400 text-sm">
+					<input type="checkbox" bind:checked={showGrid} class="w-3.5 h-3.5 rounded accent-slate-400 cursor-pointer" />
+					Grid
+				</label>
+			</div>
+
+			<!-- Spacer -->
+			<div class="flex-1"></div>
+
+			<!-- Hearts — always visible on every screen size -->
+			<div class="flex items-center gap-1.5 pr-1">
+				{#each Array(MAX_LIVES) as _, i}
+					<span
+						class="text-xl leading-none select-none transition-all duration-300
+						       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : 'text-slate-700'}"
+					>♥</span>
+				{/each}
+			</div>
 		</div>
 
-		<div class="relative bg-slate-800 p-2 sm:p-4 rounded-2xl shadow-2xl border border-slate-700/50">
-			<!--
-				Board size: as large as possible while leaving ~72px for the buttons below.
-				touch-none → touch-action:none so our action owns all touch gestures.
-			-->
-			<!--
-				Width: the lesser of 96vw and (available height × grid aspect ratio).
-				aspect-ratio then sets the height automatically, so the board fills
-				the screen in whichever dimension is the constraint.
-			-->
+		<!-- Mobile dropdown menu (slides in below top bar) -->
+		{#if menuOpen}
+			<div class="sm:hidden shrink-0 flex flex-col gap-2 p-3 bg-slate-800/98 border-b border-slate-700/60">
+				<div class="flex gap-2">
+					<button
+						onclick={() => { goToMenu(); }}
+						class="flex-1 py-2.5 text-sm font-medium rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+					>← Menu</button>
+					<button
+						onclick={() => { reset(); menuOpen = false; }}
+						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors
+						       {lost
+						           ? 'bg-red-600 text-white hover:bg-red-500'
+						           : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}"
+					>{lost ? '↺ Try Again' : 'Regenerate'}</button>
+				</div>
+				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
+					<input type="checkbox" bind:checked={showGrid} class="w-4 h-4 rounded accent-slate-400 cursor-pointer" />
+					Show Grid
+				</label>
+			</div>
+		{/if}
+
+		<!-- ── Board area — fills all remaining vertical space ──────────────────── -->
+		<!--
+			flex-1 min-h-0  → takes leftover height; min-h-0 prevents flex overflow
+			Board width: min(viewport width − padding, remaining height × aspect ratio)
+			  3rem  = top bar (h-12)
+			  1.5rem = padding (p-3 on each side)
+		-->
+		<div class="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
 			<div
-				style="width: min(96vw, calc((100dvh - 5rem) * {W / H})); aspect-ratio: {W} / {H};"
+				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem) * {W / H})); aspect-ratio: {W} / {H};"
 				class="overflow-hidden rounded-xl touch-none"
 				use:panZoomAction
 			>
@@ -453,27 +524,24 @@
 					style="width:100%;height:100%;transform:translate({panX}px,{panY}px) scale({scale});transform-origin:0 0;"
 					overflow="hidden"
 				>
-					<!-- Grid background: one SVG pattern instead of W×H individual rects -->
+					<!-- Grid background: single SVG pattern — no per-cell rects needed.
+					     Rect covers exactly the grid area (0 0 W H) so the -0.1 viewBox
+					     border doesn't show partial tile slivers at the edges. -->
 					<defs>
 						<pattern id="cell-bg" x="0" y="0" width="1" height="1" patternUnits="userSpaceOnUse">
 							<rect x="0.06" y="0.06" width="0.88" height="0.88" rx="0.18" fill="rgba(51,65,85,0.6)" />
 						</pattern>
 					</defs>
 					{#if showGrid}
-						<rect x="-0.1" y="-0.1" width={W + 0.2} height={H + 0.2} fill="url(#cell-bg)" />
+						<rect x="0" y="0" width={W} height={H} fill="url(#cell-bg)" />
 					{/if}
 
-					<!-- arrows -->
-					<!--
-						Split into two branches per arrow:
-						  static  — uses pre-computed path strings, never reads `now`, never
-						            re-renders during RAF ticks (the common case: 400+ idle arrows)
-						  animating — reads `now` and recomputes every frame (only 1–2 at a time)
-					-->
+					<!-- Arrows: split static vs animating so RAF ticks only re-render
+					     the 1–2 arrows that are actively sliding. -->
 					{#each level.arrows as arrow (arrow.id)}
 						{#if !removed.has(arrow.id)}
 							{#if anims[arrow.id]}
-								<!-- Animating branch: re-renders every RAF frame -->
+								<!-- Animating branch: recomputes every frame -->
 								{@const anim = anims[arrow.id]}
 								{@const d    = DELTA[arrow.direction]}
 								{@const el   = Math.max(0, now - anim.startTime)}
@@ -525,75 +593,29 @@
 						{/if}
 					{/each}
 
-					<!-- win overlay -->
+					<!-- Win overlay -->
 					{#if won}
 						{@const fs  = Math.min(1, W * 0.11)}
 						{@const fs2 = fs * 0.55}
-						<rect x="-0.1" y="-0.1" width={W + 0.2} height={H + 0.2} fill="rgba(15,23,42,0.75)" />
-						<text
-							x={W / 2} y={H / 2 - fs * 0.6}
-							text-anchor="middle" dominant-baseline="middle"
-							font-size={fs} font-weight="bold" fill="white"
-						>
-							Level Complete
-						</text>
-						<text
-							x={W / 2} y={H / 2 + fs * 0.9}
-							text-anchor="middle" dominant-baseline="middle"
-							font-size={fs2} fill="rgb(148,163,184)"
-						>
-							tap regenerate to play again
-						</text>
+						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.75)" />
+						<text x={W/2} y={H/2 - fs*0.6} text-anchor="middle" dominant-baseline="middle"
+							font-size={fs} font-weight="bold" fill="white">Level Complete</text>
+						<text x={W/2} y={H/2 + fs*0.9} text-anchor="middle" dominant-baseline="middle"
+							font-size={fs2} fill="rgb(148,163,184)">tap Regenerate to play again</text>
 					{/if}
 
-					<!-- game over overlay -->
+					<!-- Game over overlay -->
 					{#if lost}
 						{@const fs  = Math.min(1, W * 0.11)}
 						{@const fs2 = fs * 0.55}
-						<rect x="-0.1" y="-0.1" width={W + 0.2} height={H + 0.2} fill="rgba(15,23,42,0.82)" />
-						<text
-							x={W / 2} y={H / 2 - fs * 0.6}
-							text-anchor="middle" dominant-baseline="middle"
-							font-size={fs} font-weight="bold" fill="#ef4444"
-						>
-							Game Over
-						</text>
-						<text
-							x={W / 2} y={H / 2 + fs * 0.9}
-							text-anchor="middle" dominant-baseline="middle"
-							font-size={fs2} fill="rgb(148,163,184)"
-						>
-							tap "Try Again" to restart
-						</text>
+						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.82)" />
+						<text x={W/2} y={H/2 - fs*0.6} text-anchor="middle" dominant-baseline="middle"
+							font-size={fs} font-weight="bold" fill="#ef4444">Game Over</text>
+						<text x={W/2} y={H/2 + fs*0.9} text-anchor="middle" dominant-baseline="middle"
+							font-size={fs2} fill="rgb(148,163,184)">tap "Try Again" to restart</text>
 					{/if}
 				</svg>
 			</div>
-		</div>
-
-		<div class="flex items-center gap-3">
-			<button
-				onclick={goToMenu}
-				class="px-5 py-2 bg-slate-800 text-slate-400 font-medium rounded-lg border border-slate-700/60 hover:bg-slate-700 hover:text-slate-200 transition-colors"
-			>
-				← Menu
-			</button>
-			<button
-				onclick={reset}
-				class="px-5 py-2 font-medium rounded-lg border transition-colors
-				       {lost
-				           ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
-				           : 'bg-slate-800 text-slate-300 border-slate-700/60 hover:bg-slate-700'}"
-			>
-				{lost ? '↺ Try Again' : 'Regenerate'}
-			</button>
-			<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm">
-				<input
-					type="checkbox"
-					bind:checked={showGrid}
-					class="w-4 h-4 rounded accent-slate-400 cursor-pointer"
-				/>
-				Grid
-			</label>
 		</div>
 	</main>
 {/if}

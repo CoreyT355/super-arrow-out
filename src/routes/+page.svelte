@@ -57,10 +57,13 @@
 		maxSteps?: number;
 	}
 
+	const MAX_LIVES = 3;
+
 	let level   = $state(generateLevel(9, 9));
 	let removed = $state(new Set<number>());
 	let anims   = $state<Record<number, Anim>>({});
 	let now     = $state(performance.now());
+	let lives   = $state(MAX_LIVES);
 	let rafId: number | null = null;
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
@@ -289,6 +292,7 @@
 
 	function handleClick(id: number) {
 		if (_didMove) return; // swallow taps that ended a pan gesture
+		if (won || lives <= 0) return; // game already decided
 		if (anims[id] || removed.has(id)) return;
 		const arrow = level.arrows.find(a => a.id === id);
 		if (!arrow) return;
@@ -328,6 +332,7 @@
 
 			} else if (anim.phase === 'blocked-back' && el >= NUDGE_BACK) {
 				next[id] = { phase: 'blocked-flash', startTime: t };
+				lives = Math.max(0, lives - 1); // life lost when the red-flash penalty fires
 				dirty = true;
 
 			} else if (anim.phase === 'blocked-flash' && el >= FLASH_HALF * 4) {
@@ -349,6 +354,7 @@
 		W = w; H = h;
 		removed = new Set();
 		anims   = {};
+		lives   = MAX_LIVES;
 		level   = generateLevel(w, h);
 		resetView();
 		gameState = 'playing';
@@ -358,6 +364,7 @@
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		removed = new Set();
 		anims   = {};
+		lives   = MAX_LIVES;
 		level   = generateLevel(W, H);
 		resetView();
 	}
@@ -382,7 +389,8 @@
 		]))
 	);
 
-	const won = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
+	const won  = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
+	const lost = $derived(lives <= 0 && !won);
 </script>
 
 {#if gameState === 'menu'}
@@ -415,6 +423,16 @@
 		pb-safe   → padding-bottom: env(safe-area-inset-bottom) for notched phones
 	-->
 	<main class="w-full h-dvh bg-slate-900 flex flex-col items-center justify-center gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+		<!-- Lives display -->
+		<div class="flex items-center justify-center gap-2 mb-1">
+			{#each Array(MAX_LIVES) as _, i}
+				<span
+					class="text-2xl transition-all duration-300 {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.7)]' : 'text-slate-700'}"
+					style="line-height:1"
+				>♥</span>
+			{/each}
+		</div>
+
 		<div class="relative bg-slate-800 p-2 sm:p-4 rounded-2xl shadow-2xl border border-slate-700/50">
 			<!--
 				Board size: as large as possible while leaving ~72px for the buttons below.
@@ -527,6 +545,27 @@
 							tap regenerate to play again
 						</text>
 					{/if}
+
+					<!-- game over overlay -->
+					{#if lost}
+						{@const fs  = Math.min(1, W * 0.11)}
+						{@const fs2 = fs * 0.55}
+						<rect x="-0.1" y="-0.1" width={W + 0.2} height={H + 0.2} fill="rgba(15,23,42,0.82)" />
+						<text
+							x={W / 2} y={H / 2 - fs * 0.6}
+							text-anchor="middle" dominant-baseline="middle"
+							font-size={fs} font-weight="bold" fill="#ef4444"
+						>
+							Game Over
+						</text>
+						<text
+							x={W / 2} y={H / 2 + fs * 0.9}
+							text-anchor="middle" dominant-baseline="middle"
+							font-size={fs2} fill="rgb(148,163,184)"
+						>
+							tap "Try Again" to restart
+						</text>
+					{/if}
 				</svg>
 			</div>
 		</div>
@@ -540,9 +579,12 @@
 			</button>
 			<button
 				onclick={reset}
-				class="px-5 py-2 bg-slate-800 text-slate-300 font-medium rounded-lg border border-slate-700/60 hover:bg-slate-700 transition-colors"
+				class="px-5 py-2 font-medium rounded-lg border transition-colors
+				       {lost
+				           ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
+				           : 'bg-slate-800 text-slate-300 border-slate-700/60 hover:bg-slate-700'}"
 			>
-				Regenerate
+				{lost ? '↺ Try Again' : 'Regenerate'}
 			</button>
 			<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm">
 				<input

@@ -29,6 +29,25 @@
 		return `${w} × ${h} grid`;
 	}
 
+	// ─── local-storage progress ─────────────────────────────────────────────────
+
+	const STORAGE_KEY = 'arrow-out-progress';
+
+	// Returns {} on server (SSR) or on parse error.
+	function loadProgress(): Record<string, number> {
+		if (typeof window === 'undefined') return {};
+		try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}'); }
+		catch { return {}; }
+	}
+
+	function saveProgress(p: Record<string, number>) {
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+	}
+
+	// Initialise from storage immediately on the client (guard keeps SSR safe).
+	let progress = $state<Record<string, number>>(loadProgress());
+
 	// ─── game state ──────────────────────────────────────────────────────────────
 
 	let gameState = $state<'menu' | 'playing'>('menu');
@@ -59,11 +78,13 @@
 
 	const MAX_LIVES = 3;
 
-	let level   = $state(generateLevel(9, 9));
-	let removed = $state(new Set<number>());
-	let anims   = $state<Record<number, Anim>>({});
-	let now     = $state(performance.now());
-	let lives   = $state(MAX_LIVES);
+	let level             = $state(generateLevel(9, 9));
+	let removed           = $state(new Set<number>());
+	let anims             = $state<Record<number, Anim>>({});
+	let now               = $state(performance.now());
+	let lives             = $state(MAX_LIVES);
+	let currentDifficulty = $state<string | null>(null); // label of the active difficulty
+	let winCounted        = false; // plain bool — not reactive; reset on new game
 	let rafId: number | null = null;
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
@@ -352,21 +373,24 @@
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		const { w, h } = computeGridSize(cells, square);
 		W = w; H = h;
-		removed  = new Set();
-		anims    = {};
-		lives    = MAX_LIVES;
-		menuOpen = false;
-		level    = generateLevel(w, h);
+		removed           = new Set();
+		anims             = {};
+		lives             = MAX_LIVES;
+		menuOpen          = false;
+		winCounted        = false;
+		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
+		level             = generateLevel(w, h);
 		resetView();
 		gameState = 'playing';
 	}
 
 	function reset() {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-		removed = new Set();
-		anims   = {};
-		lives   = MAX_LIVES;
-		level   = generateLevel(W, H);
+		removed    = new Set();
+		anims      = {};
+		lives      = MAX_LIVES;
+		winCounted = false;
+		level      = generateLevel(W, H);
 		resetView();
 	}
 
@@ -394,6 +418,17 @@
 
 	const won  = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
 	const lost = $derived(lives <= 0 && !won);
+
+	// Record a completion when the player clears the board.
+	// winCounted is a plain bool (not reactive) so this fires exactly once per game.
+	$effect(() => {
+		if (won && !winCounted && currentDifficulty !== null) {
+			winCounted = true;
+			const next = { ...progress, [currentDifficulty]: (progress[currentDifficulty] ?? 0) + 1 };
+			progress = next;
+			saveProgress(next);
+		}
+	});
 </script>
 
 {#if gameState === 'menu'}
@@ -406,14 +441,29 @@
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
 			{#each DIFFICULTIES as d}
+				{@const count = progress[d.label] ?? 0}
 				<button
 					onclick={() => startGame(d.cells, d.square)}
-					class="group relative flex flex-col items-center py-4 px-6 rounded-2xl bg-gradient-to-br {d.color}
+					class="group relative flex items-center py-4 px-5 rounded-2xl bg-gradient-to-br {d.color}
 					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
 					       ring-2 ring-transparent hover:{d.ring} focus-visible:{d.ring} focus-visible:outline-none"
 				>
-					<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
-					<span class="text-white/70 text-sm mt-0.5">{gridCaption(d.cells, d.square)}</span>
+					<!-- Label + grid size -->
+					<div class="flex flex-col items-start flex-1 min-w-0">
+						<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
+						<span class="text-white/70 text-sm">{gridCaption(d.cells, d.square)}</span>
+					</div>
+					<!-- Completion count badge -->
+					<div class="flex flex-col items-center justify-center ml-3 shrink-0 min-w-[3rem]">
+						{#if count > 0}
+							<span class="text-2xl font-extrabold text-white leading-none">{count}</span>
+							<span class="text-white/60 text-[10px] uppercase tracking-widest mt-0.5">
+								{count === 1 ? 'win' : 'wins'}
+							</span>
+						{:else}
+							<span class="text-white/30 text-xs">—</span>
+						{/if}
+					</div>
 				</button>
 			{/each}
 		</div>

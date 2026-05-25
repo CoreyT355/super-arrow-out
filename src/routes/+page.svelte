@@ -23,7 +23,7 @@
 		phase: Phase;
 		startTime: number;
 		totalSteps?: number;  // exiting
-		nudgeDist?: number;   // blocked phases
+		maxSteps?: number;    // blocked: steps to collision point, then back
 	}
 
 	let level     = $state(generateLevel(W, H));
@@ -63,18 +63,17 @@
 		return arrow.path.length + edge;
 	}
 
-	// ─── blocked translation ─────────────────────────────────────────────────────
+	// ─── step position for all phases ───────────────────────────────────────────
 
-	function nudgeOffset(anim: Anim, d: { dx: number; dy: number }, elapsed: number) {
-		if (anim.phase === 'blocked-fwd') {
-			const r = easeOut(Math.min(elapsed / NUDGE_FWD, 1)) * (anim.nudgeDist ?? 0);
-			return { x: r * d.dx, y: r * d.dy };
-		}
-		if (anim.phase === 'blocked-back') {
-			const r = (1 - easeIn(Math.min(elapsed / NUDGE_BACK, 1))) * (anim.nudgeDist ?? 0);
-			return { x: r * d.dx, y: r * d.dy };
-		}
-		return { x: 0, y: 0 };
+	function computeS(anim: Anim | undefined, elapsed: number): number {
+		if (!anim) return 0;
+		if (anim.phase === 'exiting')
+			return Math.min(elapsed / MS_PER_STEP, anim.totalSteps!);
+		if (anim.phase === 'blocked-fwd')
+			return easeOut(Math.min(elapsed / NUDGE_FWD, 1)) * (anim.maxSteps ?? 0);
+		if (anim.phase === 'blocked-back')
+			return (1 - easeIn(Math.min(elapsed / NUDGE_BACK, 1))) * (anim.maxSteps ?? 0);
+		return 0; // blocked-flash: back at origin
 	}
 
 	function isFlashRed(anim: Anim, elapsed: number) {
@@ -110,11 +109,12 @@
 
 		const { blocked, dist } = checkBlocked(arrow);
 		const t = performance.now();
+		now = t; // keep now in sync so el = now - startTime is never negative on first render
 
 		if (!blocked) {
 			anims = { ...anims, [id]: { phase: 'exiting', startTime: t, totalSteps: totalExitSteps(arrow) } };
 		} else {
-			anims = { ...anims, [id]: { phase: 'blocked-fwd', startTime: t, nudgeDist: dist + 0.5 } };
+			anims = { ...anims, [id]: { phase: 'blocked-fwd', startTime: t, maxSteps: dist + 0.5 } };
 		}
 
 		if (rafId === null) rafId = requestAnimationFrame(loop);
@@ -137,7 +137,7 @@
 				delete next[id]; nextRem.add(id); dirty = true;
 
 			} else if (anim.phase === 'blocked-fwd' && el >= NUDGE_FWD) {
-				next[id] = { phase: 'blocked-back', startTime: t, nudgeDist: anim.nudgeDist };
+				next[id] = { phase: 'blocked-back', startTime: t, maxSteps: anim.maxSteps };
 				dirty = true;
 
 			} else if (anim.phase === 'blocked-back' && el >= NUDGE_BACK) {
@@ -192,60 +192,32 @@
 					{#if !removed.has(arrow.id)}
 						{@const anim = anims[arrow.id]}
 						{@const d    = DELTA[arrow.direction]}
-						{@const el   = anim ? now - anim.startTime : 0}
+						{@const el   = anim ? Math.max(0, now - anim.startTime) : 0}
 
-						{#if !anim || anim.phase === 'exiting'}
-							<!-- snake-flow animation (or static when idle) -->
-							{@const s    = anim ? Math.min(el / MS_PER_STEP, anim.totalSteps!) : 0}
-							{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
-							{@const head = pts[0]}
-							<g
-								onclick={() => handleClick(arrow.id)}
-								style={anim ? 'cursor:default;pointer-events:none' : 'cursor:pointer'}
-							>
-								<polyline
-									points={pts.map(p => `${p.x + 0.5},${p.y + 0.5}`).join(' ')}
-									fill="none"
-									stroke={arrow.color}
-									stroke-width={0.72}
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									opacity={0.82}
-								/>
-								<polygon
-									points="0.24,0 -0.1,-0.15 -0.1,0.15"
-									transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-									fill="white"
-									opacity={0.9}
-								/>
-							</g>
-
-						{:else}
-							<!-- rigid nudge animation for blocked arrows -->
-							{@const tx  = nudgeOffset(anim, d, el)}
-							{@const red = isFlashRed(anim, el)}
-							<g
-								transform="translate({tx.x},{tx.y})"
-								onclick={() => handleClick(arrow.id)}
-								style="cursor:default;pointer-events:none"
-							>
-								<polyline
-									points={arrow.path.map(p => `${p.x + 0.5},${p.y + 0.5}`).join(' ')}
-									fill="none"
-									stroke={red ? '#ef4444' : arrow.color}
-									stroke-width={0.72}
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									opacity={0.82}
-								/>
-								<polygon
-									points="0.24,0 -0.1,-0.15 -0.1,0.15"
-									transform="translate({arrow.path[0].x + 0.5},{arrow.path[0].y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-									fill="white"
-									opacity={0.9}
-								/>
-							</g>
-						{/if}
+						{@const s    = computeS(anim, el)}
+						{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
+						{@const head = pts[0]}
+						{@const red  = anim ? isFlashRed(anim, el) : false}
+						<g
+							onclick={() => handleClick(arrow.id)}
+							style={anim ? 'cursor:default;pointer-events:none' : 'cursor:pointer'}
+						>
+							<polyline
+								points={pts.map(p => `${p.x + 0.5},${p.y + 0.5}`).join(' ')}
+								fill="none"
+								stroke={red ? '#ef4444' : arrow.color}
+								stroke-width={0.72}
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								opacity={0.82}
+							/>
+							<polygon
+								points="0.24,0 -0.1,-0.15 -0.1,0.15"
+								transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
+								fill="white"
+								opacity={0.9}
+							/>
+						</g>
 					{/if}
 				{/each}
 

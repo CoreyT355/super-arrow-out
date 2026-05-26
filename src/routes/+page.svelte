@@ -954,8 +954,14 @@
 							<button
 								onclick={() => reset(false)}
 								class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
-								       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150"
-							>New Level</button>
+							       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150
+							       flex items-center justify-center gap-2"
+						>
+							<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polygon points="6,3 15,9 6,15" fill="currentColor" stroke="none"/>
+							</svg>
+							New Level
+						</button>
 							<button
 								onclick={goToMenu}
 								class="px-6 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95

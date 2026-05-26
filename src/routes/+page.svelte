@@ -944,52 +944,43 @@
 						{/if}
 					{/each}
 
-					<!-- Win overlay (dark scrim + title only — button is HTML below) -->
-					{#if won}
-						{@const fs = Math.min(1, W * 0.11)}
-						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.75)" />
-						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs} font-weight="bold" fill="white">Level Complete</text>
-					{/if}
-
-					<!-- Game over overlay (dark scrim + title only — buttons are HTML below) -->
-					{#if lost}
-						{@const fs = Math.min(1, W * 0.11)}
-						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.82)" />
-						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs} font-weight="bold" fill="#ef4444">Game Over</text>
-					{/if}
 				</svg>
 
-				<!-- HTML win button — rendered on top of the SVG scrim -->
+				<!-- Win panel — centered HTML overlay, unaffected by zoom/pan -->
 				{#if won}
-					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
-						<button
-							onclick={() => reset(false)}
-							class="pointer-events-auto px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
-							       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150"
-						>New Level</button>
-						<button
-							onclick={goToMenu}
-							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
-							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
-						>← Menu</button>
+					<div class="absolute inset-0 flex items-center justify-center bg-slate-950/75">
+						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl bg-slate-900/90 border border-slate-700/60 shadow-2xl">
+							<p class="text-2xl font-extrabold text-white tracking-tight">Level Complete</p>
+							<button
+								onclick={() => reset(false)}
+								class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
+								       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150"
+							>New Level</button>
+							<button
+								onclick={goToMenu}
+								class="px-6 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95
+								       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
+							>← Main Menu</button>
+						</div>
 					</div>
 				{/if}
 
-				<!-- HTML game-over buttons — rendered on top of the SVG scrim -->
+				<!-- Game-over panel — centered HTML overlay, unaffected by zoom/pan -->
 				{#if lost}
-					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
-						<button
-							onclick={() => reset(true)}
-							class="pointer-events-auto px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
-							       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
-						>↺ Try Again</button>
-						<button
-							onclick={goToMenu}
-							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
-							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
-						>← Menu</button>
+					<div class="absolute inset-0 flex items-center justify-center bg-slate-950/80">
+						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl bg-slate-900/90 border border-slate-700/60 shadow-2xl">
+							<p class="text-2xl font-extrabold text-red-400 tracking-tight">Game Over</p>
+							<button
+								onclick={() => reset(true)}
+								class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
+								       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
+							>↺ Try Again</button>
+							<button
+								onclick={goToMenu}
+								class="px-6 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95
+								       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
+							>← Main Menu</button>
+						</div>
 					</div>
 				{/if}
 			</div>

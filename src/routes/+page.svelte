@@ -11,7 +11,7 @@
 		{ label: 'Hard',       cells:   256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6' },
 		{ label: 'Super Hard', cells:  1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316' },
 		{ label: 'Expert',     cells:  4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48' },
-		{ label: 'Floor Boss', cells: 16384, square: false, color: 'from-yellow-400 to-amber-500',    ring: 'ring-yellow-300',  chartColor: '#f59e0b' },
+		{ label: 'Floor Boss', cells: 16384, square: false, color: 'from-yellow-400 to-amber-500',    ring: 'ring-yellow-300',  chartColor: '#f59e0b', hidden: true },
 	];
 
 	// Compute W × H for a difficulty, fitting the current viewport aspect ratio.
@@ -568,7 +568,7 @@
 		</div>
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
-			{#each DIFFICULTIES as d}
+			{#each DIFFICULTIES.filter(d => !d.hidden) as d}
 				{@const count = progress[d.label] ?? 0}
 				<button
 					onclick={() => startGame(d.cells, d.square)}

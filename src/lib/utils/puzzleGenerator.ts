@@ -225,6 +225,48 @@ function absorbShortArrows(arrows: Arrow[], minLen: number): Arrow[] {
     return result;
 }
 
+// After the main generation loop, extend arrow tails to absorb any remaining
+// empty cells. The tail map is updated dynamically so a tail can "walk" through
+// a chain of adjacent empties in a single pass of the outer while loop.
+// Cells that are completely surrounded by non-tail occupied cells (rare) are
+// left alone — they cannot be absorbed without breaking path connectivity.
+function fillEmptyCells(arrows: Arrow[], grid: Grid, w: number, h: number): Arrow[] {
+    const result = arrows.map(a => ({ ...a, path: [...a.path] }));
+
+    let changed = true;
+    while (changed) {
+        changed = false;
+
+        // tail position key → index into result[]
+        const tailOf = new Map<number, number>();
+        for (let i = 0; i < result.length; i++) {
+            const t = result[i].path[result[i].path.length - 1];
+            tailOf.set(t.y * w + t.x, i);
+        }
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                if (grid[y][x] !== 'empty') continue;
+                for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+                    const nx = x + dx, ny = y + dy;
+                    if (!inBounds(nx, ny, w, h)) continue;
+                    const idx = tailOf.get(ny * w + nx);
+                    if (idx === undefined) continue;
+                    // Absorb: move the tail from the neighbour to this cell
+                    tailOf.delete(ny * w + nx);
+                    tailOf.set(y * w + x, idx);
+                    grid[y][x] = 'occupied';
+                    result[idx].path.push({ x, y });
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
 export function generateLevel(
     width = 9,
     height = 9
@@ -235,8 +277,11 @@ export function generateLevel(
     let consecutiveFails = 0;
 
     const shortDimension = Math.min(width, height);
-    const minLength = Math.max(4, Math.floor(shortDimension * 0.5));
-    const maxLength = Math.max(7, Math.floor(shortDimension * 1.2));
+    const maxLength = Math.min(30, Math.max(7, Math.floor(shortDimension * 1.2)));
+    // minLength must not exceed maxLength — on very large grids the 0.5× formula
+    // would exceed the cap (e.g. Floor Boss shortDim=91 → raw min=45 > max=30),
+    // which inverts the random range and breaks the body-length calculation.
+    const minLength = Math.min(Math.max(4, Math.floor(shortDimension * 0.5)), Math.max(4, maxLength - 4));
     const MIN_ARROW_LEN = Math.max(3, Math.floor(shortDimension * 0.25));
     const changeDirChance = Math.max(0.1, 0.45 - (shortDimension * 0.007));
 
@@ -279,7 +324,8 @@ export function generateLevel(
         }
     }
 
-    const finalArrows = absorbShortArrows(arrows, MIN_ARROW_LEN);
+    const absorbed = absorbShortArrows(arrows, MIN_ARROW_LEN);
+    const finalArrows = fillEmptyCells(absorbed, grid, width, height);
 
     return {
         width,

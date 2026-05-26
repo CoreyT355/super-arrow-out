@@ -63,19 +63,22 @@ function getExitDirs(grid: Grid, x: number, y: number, w: number, h: number): Di
     const dirs: Direction[] = [];
     const onLeft = x === 0, onRight = x === w - 1, onTop = y === 0, onBottom = y === h - 1;
 
+    // Edge directions are always valid (head is at that edge — zero-step exit).
     if (onLeft) dirs.push('W');
     if (onRight) dirs.push('E');
     if (onTop) dirs.push('N');
     if (onBottom) dirs.push('S');
 
-    if (dirs.length === 0) {
-        if (clearPathToEdge(grid, x, y, -1, 0, w, h)) dirs.push('W');
-        if (clearPathToEdge(grid, x, y, 1, 0, w, h)) dirs.push('E');
-        if (clearPathToEdge(grid, x, y, 0, -1, w, h)) dirs.push('N');
-        if (clearPathToEdge(grid, x, y, 0, 1, w, h)) dirs.push('S');
-    }
+    // Also consider non-edge directions whose exit path is already lined with
+    // occupied cells — those existing arrows will exit before this one, leaving
+    // the path clear. This lets edge cells sometimes exit perpendicular to
+    // their edge instead of being forced into the edge direction.
+    if (!onLeft   && clearPathToEdge(grid, x, y, -1,  0, w, h)) dirs.push('W');
+    if (!onRight  && clearPathToEdge(grid, x, y,  1,  0, w, h)) dirs.push('E');
+    if (!onTop    && clearPathToEdge(grid, x, y,  0, -1, w, h)) dirs.push('N');
+    if (!onBottom && clearPathToEdge(grid, x, y,  0,  1, w, h)) dirs.push('S');
 
-    // CRITICAL: Shuffle the exit array so the code doesn't implicitly 
+    // CRITICAL: Shuffle the exit array so the code doesn't implicitly
     // favor West or North when multiple directions are valid.
     return shuffle(dirs);
 }
@@ -110,6 +113,41 @@ function emptyPocketSizes(grid: Grid, w: number, h: number): number[] {
     return sizes;
 }
 
+// Count how many already-placed arrows in a square window around (cx,cy) exit
+// in each direction. Used to bias new picks AWAY from over-represented dirs.
+function localDirCounts(
+    arrows: Arrow[],
+    cx: number,
+    cy: number,
+    radius: number
+): Record<Direction, number> {
+    const counts: Record<Direction, number> = { N: 0, S: 0, E: 0, W: 0 };
+    for (const a of arrows) {
+        const head = a.path[0];
+        if (Math.abs(head.x - cx) <= radius && Math.abs(head.y - cy) <= radius) {
+            counts[a.direction]++;
+        }
+    }
+    return counts;
+}
+
+// Weighted pick: each direction's weight = 1 / (1 + k * localCount).
+// k controls how strongly clustering is penalized — bigger k → stronger anti-clustering.
+function pickWeightedDir(
+    dirs: Direction[],
+    counts: Record<Direction, number>,
+    k: number
+): Direction {
+    const weights = dirs.map(d => 1 / (1 + k * counts[d]));
+    const total = weights.reduce((s, w) => s + w, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < dirs.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return dirs[i];
+    }
+    return dirs[dirs.length - 1];
+}
+
 function generateArrow(
     grid: Grid,
     id: number,
@@ -118,18 +156,59 @@ function generateArrow(
     minLen: number,
     maxLen: number,
     changeDirChance: number,
-    seedPos: GridPos // Now accepting the dynamic shuffled entry seed directly
+    seedPos: GridPos, // Now accepting the dynamic shuffled entry seed directly
+    placedArrows: Arrow[],
+    clusterRadius: number
 ): Arrow | null {
     const { x: ex, y: ey } = seedPos;
-    
-    // If the random seed position isn't valid or open, reject immediately 
+
+    // If the random seed position isn't valid or open, reject immediately
     if (grid[ey][ex] !== 'empty') return null;
 
     const possibleDirs = getExitDirs(grid, ex, ey, w, h);
     if (possibleDirs.length === 0) return null;
 
-    // Pick a random exit route out of our shuffled possibilities
-    const exitDir = possibleDirs[Math.floor(Math.random() * possibleDirs.length)];
+    // Anti-clustering: bias the pick against directions over-represented
+    // among neighbouring arrows. When only one direction is valid (common on
+    // edges), the weighted pick degenerates to that single choice.
+    const localCounts = localDirCounts(placedArrows, ex, ey, clusterRadius);
+
+    // Skip-and-absorb: if the seed is FORCED into a single direction (typical
+    // for edge cells), bail out probabilistically so fillEmptyCells later
+    // absorbs the cell into a neighbour's tail — which usually points a
+    // different way. Breaks long contiguous stretches of edge heads all
+    // exiting the same way. The count looks ALONG the edge axis with a long
+    // reach, since scattered spawn order means same-edge clusters often form
+    // before tight-box detection would notice.
+    if (possibleDirs.length === 1) {
+        const only = possibleDirs[0];
+        const onLeft = ex === 0, onRight = ex === w - 1, onTop = ey === 0, onBottom = ey === h - 1;
+        const edgeAxis: 'x' | 'y' | null =
+            (onLeft || onRight) ? 'y' : (onTop || onBottom) ? 'x' : null;
+
+        const longReach = 10;
+        let nearbySameDir = 0;
+        for (const a of placedArrows) {
+            if (a.direction !== only) continue;
+            const head = a.path[0];
+            if (edgeAxis === 'y') {
+                if (head.x === ex && Math.abs(head.y - ey) <= longReach) nearbySameDir++;
+            } else if (edgeAxis === 'x') {
+                if (head.y === ey && Math.abs(head.x - ex) <= longReach) nearbySameDir++;
+            } else if (Math.abs(head.x - ex) <= 4 && Math.abs(head.y - ey) <= 4) {
+                nearbySameDir++;
+            }
+        }
+        // Ramp: even at 0 nearby, a small base skip prevents stochastic
+        // clustering from random spawn ordering establishing a foothold.
+        const skipProb = nearbySameDir === 0 ? 0.15
+                       : nearbySameDir === 1 ? 0.5
+                       : nearbySameDir === 2 ? 0.75
+                       :                       0.9;
+        if (Math.random() < skipProb) return null;
+    }
+
+    const exitDir = pickWeightedDir(possibleDirs, localCounts, 1.5);
 
     grid[ey][ex] = 'occupied';
     const path: GridPos[] = [{ x: ex, y: ey }];
@@ -284,6 +363,9 @@ export function generateLevel(
     const minLength = Math.min(Math.max(4, Math.floor(shortDimension * 0.5)), Math.max(4, maxLength - 4));
     const MIN_ARROW_LEN = Math.max(3, Math.floor(shortDimension * 0.25));
     const changeDirChance = Math.max(0.1, 0.45 - (shortDimension * 0.007));
+    // Radius of the "neighborhood" used for anti-clustering direction weighting.
+    // Scales with grid size so a small board still sees a meaningful window.
+    const clusterRadius = Math.max(3, Math.floor(shortDimension * 0.35));
 
     let spawnQueue: { x: number; y: number }[] = [];
     for (let y = 0; y < height; y++) {
@@ -304,7 +386,7 @@ export function generateLevel(
         const seedPos = spawnQueue[queueIndex++];
 
         // CRITICAL CHANGE: We now pass the random seed point straight into the generator!
-        const arrow = generateArrow(grid, id, width, height, minLength, maxLength, changeDirChance, seedPos);
+        const arrow = generateArrow(grid, id, width, height, minLength, maxLength, changeDirChance, seedPos, arrows, clusterRadius);
 
         if (arrow) {
             const pockets = emptyPocketSizes(grid, width, height);

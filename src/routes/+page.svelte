@@ -33,8 +33,9 @@
 
 	// ─── local-storage helpers ──────────────────────────────────────────────────
 
-	const STORAGE_KEY  = 'arrow-out-progress';
-	const PUZZLE_KEY   = 'arrow-out-puzzle';
+	const STORAGE_KEY   = 'arrow-out-progress';
+	const PUZZLE_KEY    = 'arrow-out-puzzle';
+	const SETTINGS_KEY  = 'arrow-out-settings';
 
 	// Returns {} on server (SSR) or on parse error.
 	function loadProgress(): Record<string, number> {
@@ -60,6 +61,24 @@
 			const raw = localStorage.getItem(PUZZLE_KEY);
 			return raw ? JSON.parse(raw) : null;
 		} catch { return null; }
+	}
+
+	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean } {
+		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true, darkMode: true };
+		try {
+			const raw = localStorage.getItem(SETTINGS_KEY);
+			const parsed = raw ? JSON.parse(raw) : {};
+			return {
+				showGrid:       parsed.showGrid       ?? true,
+				roundedCorners: parsed.roundedCorners ?? true,
+				darkMode:       parsed.darkMode       ?? true,
+			};
+		} catch { return { showGrid: true, roundedCorners: true, darkMode: true }; }
+	}
+
+	function saveSettings(s: { showGrid: boolean; roundedCorners: boolean; darkMode: boolean }) {
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 	}
 
 	// Initialise from storage immediately on the client (guard keeps SSR safe).
@@ -531,9 +550,24 @@
 
 	const totalWins = $derived(DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
 
-	let showGrid       = $state(true);
-	let roundedCorners = $state(true);
+	const _settings    = loadSettings();
+	let showGrid       = $state(_settings.showGrid);
+	let roundedCorners = $state(_settings.roundedCorners);
+	let darkMode       = $state(_settings.darkMode);
 	let menuOpen       = $state(false);
+
+	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode }); });
+
+	// ─── theme-aware arrow colors ────────────────────────────────────────────────
+
+	// Dark palette: bright pastels readable on dark backgrounds.
+	// Light palette: saturated -600/-700 variants readable on light backgrounds.
+	const COLORS_DARK  = ['#f87171','#60a5fa','#4ade80','#c084fc','#fb923c','#f472b6','#facc15','#2dd4bf','#22d3ee','#a3e635'];
+	const COLORS_LIGHT = ['#dc2626','#2563eb','#16a34a','#9333ea','#ea580c','#db2777','#a16207','#0d9488','#0891b2','#65a30d'];
+
+	function themeColor(id: number): string {
+		return (darkMode ? COLORS_DARK : COLORS_LIGHT)[id % 10];
+	}
 
 	// Pre-compute SVG path strings and head positions for every arrow at s=0.
 	// These are used by the static (non-animating) render branch so idle arrows
@@ -562,10 +596,10 @@
 
 {#if gameState === 'menu'}
 	<!-- ─── Start screen ─────────────────────────────────────────────────────── -->
-	<main class="w-full h-dvh bg-slate-900 flex flex-col items-center justify-center gap-6 p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+	<main class="w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col items-center justify-center gap-6 p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
 		<div class="text-center">
-			<h1 class="text-5xl font-extrabold text-white tracking-tight mb-2">Arrow Out</h1>
-			<p class="text-slate-400 text-lg">Click a snake to send it sliding — clear the board to win.</p>
+			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Arrow Out</h1>
+			<p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p>
 		</div>
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
@@ -599,7 +633,7 @@
 
 		<button
 			onclick={goToStats}
-			class="text-slate-500 hover:text-slate-300 text-sm transition-colors mt-2 flex items-center gap-1.5"
+			class="{darkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} text-sm transition-colors mt-2 flex items-center gap-1.5"
 		>
 			<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 				<rect x="1" y="7" width="3" height="6" rx="0.5"/>
@@ -612,17 +646,19 @@
 
 {:else if gameState === 'stats'}
 	<!-- Stats screen -->
-	<main class="w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
+	<main class="w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col overflow-hidden">
 
 		<!-- Top bar -->
-		<div class="shrink-0 flex items-center px-4 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm"
+		<div class="shrink-0 flex items-center px-4 border-b {darkMode ? 'border-slate-800/80 bg-slate-900/95' : 'border-slate-300/80 bg-slate-100/95'} backdrop-blur-sm"
 		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))">
 			<button
 				onclick={goToMenu}
-				class="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60
-				       hover:bg-slate-700 hover:text-slate-200 transition-colors"
+				class="px-3 py-1.5 text-sm font-medium rounded-lg transition-colors
+				       {darkMode
+				           ? 'bg-slate-800 text-slate-400 border border-slate-700/60 hover:bg-slate-700 hover:text-slate-200'
+				           : 'bg-slate-200 text-slate-600 border border-slate-300/60 hover:bg-slate-300 hover:text-slate-800'}"
 			>← Back</button>
-			<span class="flex-1 text-center text-white font-bold tracking-wide">Stats</span>
+			<span class="flex-1 text-center {darkMode ? 'text-white' : 'text-slate-900'} font-bold tracking-wide">Stats</span>
 			<div class="w-[4.5rem]"></div>
 		</div>
 
@@ -632,7 +668,9 @@
 			<!-- Donut chart -->
 			<svg viewBox="0 0 200 200" width="220" height="220" style="overflow:visible">
 				<!-- Background ring -->
-				<circle cx="100" cy="100" r={DONUT_R} fill="none" stroke="rgba(51,65,85,0.5)" stroke-width="28" />
+				<circle cx="100" cy="100" r={DONUT_R} fill="none"
+					stroke={darkMode ? 'rgba(51,65,85,0.5)' : 'rgba(203,213,225,0.8)'}
+					stroke-width="28" />
 
 				{#if totalWins > 0}
 					{#each chartSegments as seg}
@@ -653,25 +691,25 @@
 				<!-- Centre label -->
 				{#if totalWins === 0}
 					<text x="100" y="100" text-anchor="middle" dominant-baseline="middle"
-						font-size="13" fill="rgb(100,116,139)">No wins yet</text>
+						font-size="13" fill={darkMode ? 'rgb(100,116,139)' : 'rgb(148,163,184)'}>No wins yet</text>
 				{:else}
 					<text x="100" y="90" text-anchor="middle" dominant-baseline="middle"
-						font-size="36" font-weight="800" fill="white">{totalWins}</text>
+						font-size="36" font-weight="800" fill={darkMode ? 'white' : 'rgb(15,23,42)'}>{totalWins}</text>
 					<text x="100" y="116" text-anchor="middle" dominant-baseline="middle"
-						font-size="12" fill="rgb(100,116,139)" letter-spacing="1">
+						font-size="12" fill={darkMode ? 'rgb(100,116,139)' : 'rgb(100,116,139)'} letter-spacing="1">
 						{totalWins === 1 ? 'TOTAL WIN' : 'TOTAL WINS'}
 					</text>
 				{/if}
 			</svg>
 
 			<!-- Breakdown legend -->
-			<div class="w-full max-w-xs flex flex-col divide-y divide-slate-800/60">
+			<div class="w-full max-w-xs flex flex-col {darkMode ? 'divide-slate-800/60' : 'divide-slate-300/60'} divide-y">
 				{#each chartSegments as seg}
 					<div class="flex items-center gap-3 py-3">
 						<div class="w-3 h-3 rounded-full shrink-0" style="background:{seg.chartColor}"></div>
-						<span class="text-slate-300 flex-1 text-sm font-medium">{seg.label}</span>
-						<span class="text-white font-bold tabular-nums w-8 text-right">{seg.count}</span>
-						<span class="text-slate-500 text-sm tabular-nums w-10 text-right">
+						<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} flex-1 text-sm font-medium">{seg.label}</span>
+						<span class="{darkMode ? 'text-white' : 'text-slate-900'} font-bold tabular-nums w-8 text-right">{seg.count}</span>
+						<span class="{darkMode ? 'text-slate-500' : 'text-slate-400'} text-sm tabular-nums w-10 text-right">
 							{seg.total > 0 ? Math.round(seg.frac * 100) : 0}%
 						</span>
 					</div>
@@ -682,17 +720,19 @@
 
 {:else}
 	<!-- ─── Game screen ──────────────────────────────────────────────────────── -->
-	<main class="relative w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
+	<main class="relative w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col overflow-hidden">
 
 		<!-- ── Top bar ──────────────────────────────────────────────────────────── -->
 		<!-- h-12 = 3rem fixed; shrink-0 prevents flex from squishing it -->
-		<div class="shrink-0 flex items-center gap-2 px-3 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm"
+		<div class="shrink-0 flex items-center gap-2 px-3 border-b {darkMode ? 'border-slate-800/80 bg-slate-900/95' : 'border-slate-300/80 bg-slate-100/95'} backdrop-blur-sm"
 		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))">
 
-			<!-- Mobile: hamburger button -->
+			<!-- Hamburger button — always visible -->
 			<button
-				class="sm:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 text-slate-400
-				       hover:bg-slate-700 hover:text-white transition-colors active:scale-95"
+				class="flex items-center justify-center w-9 h-9 rounded-lg transition-colors active:scale-95
+				       {darkMode
+				           ? 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
+				           : 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-800'}"
 				onclick={() => (menuOpen = !menuOpen)}
 				aria-label={menuOpen ? 'Close menu' : 'Open menu'}
 			>
@@ -711,30 +751,6 @@
 				{/if}
 			</button>
 
-			<!-- Desktop: inline controls -->
-			<div class="hidden sm:flex items-center gap-2">
-				<button
-					onclick={goToMenu}
-					class="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60
-					       hover:bg-slate-700 hover:text-slate-200 transition-colors"
-				>← Menu</button>
-				<button
-					onclick={() => reset(lost)}
-					class="px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors
-					       {lost
-					           ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
-					           : 'bg-slate-800 text-slate-300 border-slate-700/60 hover:bg-slate-700'}"
-				>{lost ? '↺ Try Again' : 'Regenerate'}</button>
-				<label class="flex items-center gap-1.5 cursor-pointer select-none text-slate-400 text-sm">
-					<input type="checkbox" bind:checked={showGrid} class="w-3.5 h-3.5 rounded accent-slate-400 cursor-pointer" />
-					Grid
-				</label>
-				<label class="flex items-center gap-1.5 cursor-pointer select-none text-slate-400 text-sm">
-					<input type="checkbox" bind:checked={roundedCorners} class="w-3.5 h-3.5 rounded accent-slate-400 cursor-pointer" />
-					Rounded
-				</label>
-			</div>
-
 			<!-- Spacer -->
 			<div class="flex-1"></div>
 
@@ -743,7 +759,7 @@
 				{#each Array(MAX_LIVES) as _, i}
 					<span
 						class="text-xl leading-none select-none transition-all duration-300
-						       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : 'text-slate-700'}"
+						       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : darkMode ? 'text-slate-700' : 'text-slate-300'}"
 					>♥</span>
 				{/each}
 			</div>
@@ -753,7 +769,7 @@
 		{#if menuOpen}
 			<!-- Backdrop: tap anywhere outside the panel to close -->
 			<button
-				class="sm:hidden absolute inset-0 z-30 bg-slate-950/40"
+				class="absolute inset-0 z-30 {darkMode ? 'bg-slate-950/40' : 'bg-slate-400/30'}"
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				onclick={() => (menuOpen = false)}
 				aria-label="Close menu"
@@ -761,31 +777,109 @@
 
 			<!-- Panel: slides down from below the top bar -->
 			<div
-				class="sm:hidden absolute left-0 right-0 z-40 flex flex-col gap-2 p-3
-				       bg-slate-900/95 backdrop-blur-md border-b border-slate-700/60 shadow-xl"
+				class="absolute left-0 right-0 z-40 flex flex-col gap-2 p-3 border-b shadow-xl
+				       {darkMode
+				           ? 'bg-slate-900/95 backdrop-blur-md border-slate-700/60'
+				           : 'bg-white/95 backdrop-blur-md border-slate-300/60'}"
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				transition:fly={{ y: -6, duration: 160, opacity: 0 }}
 			>
 				<div class="flex gap-2">
 					<button
 						onclick={() => { goToMenu(); menuOpen = false; }}
-						class="flex-1 py-2.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
-					>← Menu</button>
+						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors
+						       {darkMode
+						           ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+						           : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'}"
+					>← Main Menu</button>
 					<button
 						onclick={() => { reset(lost); menuOpen = false; }}
-						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors
+						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5
 						       {lost
 						           ? 'bg-red-600 text-white hover:bg-red-500'
-						           : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
-					>{lost ? '↺ Try Again' : 'Regenerate'}</button>
+						           : darkMode
+						               ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+						               : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'}"
+					>
+						{#if lost}
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M1 7a6 6 0 1 0 1.2-3.6"/><polyline points="1 2 1 5.5 4.5 5.5"/>
+							</svg>
+							Try Again
+						{:else}
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M13 2v3.5H9.5"/><path d="M1 7a6 6 0 0 1 10.2-4.3L13 5.5"/>
+								<path d="M1 12v-3.5H4.5"/><path d="M13 7a6 6 0 0 1-10.2 4.3L1 8.5"/>
+							</svg>
+							Regenerate Puzzle
+						{/if}
+					</button>
 				</div>
-				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
-					<input type="checkbox" bind:checked={showGrid} class="w-4 h-4 rounded accent-slate-400 cursor-pointer" />
-					Show Grid
+
+				<!-- Toggle: Dark Mode -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm flex items-center gap-1.5">
+						{#if darkMode}
+							<!-- Moon icon -->
+							<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M11 8.5A5 5 0 0 1 4.5 2a5 5 0 1 0 6.5 6.5z"/>
+							</svg>
+						{:else}
+							<!-- Sun icon -->
+							<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="6.5" cy="6.5" r="2.2"/>
+								<line x1="6.5" y1="1" x2="6.5" y2="0.1"/>
+								<line x1="6.5" y1="12" x2="6.5" y2="12.9"/>
+								<line x1="1" y1="6.5" x2="0.1" y2="6.5"/>
+								<line x1="12" y1="6.5" x2="12.9" y2="6.5"/>
+								<line x1="2.9" y1="2.9" x2="2.2" y2="2.2"/>
+								<line x1="10.1" y1="10.1" x2="10.8" y2="10.8"/>
+								<line x1="10.1" y1="2.9" x2="10.8" y2="2.2"/>
+								<line x1="2.9" y1="10.1" x2="2.2" y2="10.8"/>
+							</svg>
+						{/if}
+						Dark Mode
+					</span>
+					<button
+						role="switch"
+						aria-checked={darkMode}
+						onclick={() => (darkMode = !darkMode)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {darkMode ? 'bg-emerald-500' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
+						             {darkMode ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
 				</label>
-				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
-					<input type="checkbox" bind:checked={roundedCorners} class="w-4 h-4 rounded accent-slate-400 cursor-pointer" />
-					Rounded Corners
+
+				<!-- Toggle: Show Grid -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Show Grid</span>
+					<button
+						role="switch"
+						aria-checked={showGrid}
+						onclick={() => (showGrid = !showGrid)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {showGrid ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
+						             {showGrid ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
+
+				<!-- Toggle: Rounded Corners -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Rounded Corners</span>
+					<button
+						role="switch"
+						aria-checked={roundedCorners}
+						onclick={() => (roundedCorners = !roundedCorners)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {roundedCorners ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
+						             {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
 				</label>
 			</div>
 		{/if}
@@ -813,7 +907,8 @@
 					     border doesn't show partial tile slivers at the edges. -->
 					<defs>
 						<pattern id="cell-bg" x="0" y="0" width="1" height="1" patternUnits="userSpaceOnUse">
-							<rect x="0.06" y="0.06" width="0.88" height="0.88" rx="0.18" fill="rgba(51,65,85,0.6)" />
+							<rect x="0.06" y="0.06" width="0.88" height="0.88" rx="0.18"
+								fill={darkMode ? 'rgba(51,65,85,0.6)' : 'rgba(203,213,225,0.8)'} />
 						</pattern>
 					</defs>
 					{#if showGrid}
@@ -839,12 +934,13 @@
 									{@const aheadPt  = ref ? ref.getPointAtLength(Math.min(anim.L_total ?? 0, headLen + 0.1))
 									                       : { x: headPt.x + DELTA[arrow.direction].dx, y: headPt.y + DELTA[arrow.direction].dy }}
 									{@const angle    = Math.atan2(aheadPt.y - headPt.y, aheadPt.x - headPt.x) * 180 / Math.PI}
+									{@const color    = themeColor(arrow.id)}
 									<g style="cursor:default;pointer-events:none">
 										<path
 											bind:this={pathRefs[arrow.id]}
 											d={anim.routeD}
 											fill="none"
-											stroke={arrow.color}
+											stroke={color}
 											stroke-width={0.14}
 											stroke-linecap="round"
 											stroke-linejoin="round"
@@ -855,7 +951,7 @@
 										<polygon
 											points="0.32,0 -0.16,-0.24 -0.16,0.24"
 											transform="translate({headPt.x},{headPt.y}) rotate({angle})"
-											fill={arrow.color}
+											fill={color}
 											opacity={0.95}
 										/>
 									</g>
@@ -867,11 +963,12 @@
 									{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
 									{@const head = pts[0]}
 									{@const red  = isFlashRed(anim, el)}
+									{@const color = themeColor(arrow.id)}
 									<g style="cursor:default;pointer-events:none">
 										<path
 											d={roundedPath(pts, roundedCorners ? 0.4 : 0)}
 											fill="none"
-											stroke={red ? '#ef4444' : arrow.color}
+											stroke={red ? '#ef4444' : color}
 											stroke-width={0.14}
 											stroke-linecap="round"
 											stroke-linejoin="round"
@@ -880,16 +977,16 @@
 										<polygon
 											points="0.32,0 -0.16,-0.24 -0.16,0.24"
 											transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-											fill={red ? '#ef4444' : arrow.color}
+											fill={red ? '#ef4444' : color}
 											opacity={0.95}
 										/>
 									</g>
 								{/if}
 							{:else}
 								<!-- Static branch: pre-computed paths, zero per-frame cost -->
-								{@const sd       = staticArrowData[arrow.id]}
+								{@const sd        = staticArrowData[arrow.id]}
 								{@const penalized = markedRed.has(arrow.id)}
-								{@const drawColor = penalized ? '#b91c1c' : arrow.color}
+								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
 								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer">
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
@@ -914,52 +1011,59 @@
 						{/if}
 					{/each}
 
-					<!-- Win overlay (dark scrim + title only — button is HTML below) -->
-					{#if won}
-						{@const fs = Math.min(1, W * 0.11)}
-						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.75)" />
-						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs} font-weight="bold" fill="white">Level Complete</text>
-					{/if}
-
-					<!-- Game over overlay (dark scrim + title only — buttons are HTML below) -->
-					{#if lost}
-						{@const fs = Math.min(1, W * 0.11)}
-						<rect x="0" y="0" width={W} height={H} fill="rgba(15,23,42,0.82)" />
-						<text x={W/2} y={H/2} text-anchor="middle" dominant-baseline="middle"
-							font-size={fs} font-weight="bold" fill="#ef4444">Game Over</text>
-					{/if}
 				</svg>
 
-				<!-- HTML win button — rendered on top of the SVG scrim -->
+				<!-- Win panel — centered HTML overlay, unaffected by zoom/pan -->
 				{#if won}
-					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
-						<button
-							onclick={() => reset(false)}
-							class="pointer-events-auto px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
-							       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150"
-						>New Level</button>
-						<button
-							onclick={goToMenu}
-							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
-							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
-						>← Menu</button>
+					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}">
+						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
+						            {darkMode
+						                ? 'bg-slate-900/90 border border-slate-700/60'
+						                : 'bg-white/95 border border-slate-200/60'}">
+							<p class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
+							<button
+								onclick={() => reset(false)}
+								class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
+								       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150
+								       flex items-center justify-center gap-2"
+							>
+								<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<polygon points="6,3 15,9 6,15" fill="currentColor" stroke="none"/>
+								</svg>
+								New Level
+							</button>
+							<button
+								onclick={goToMenu}
+								class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
+								       {darkMode
+								           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
+								           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
+							>← Main Menu</button>
+						</div>
 					</div>
 				{/if}
 
-				<!-- HTML game-over buttons — rendered on top of the SVG scrim -->
+				<!-- Game-over panel — centered HTML overlay, unaffected by zoom/pan -->
 				{#if lost}
-					<div class="absolute inset-0 flex flex-col items-center justify-end gap-3 pb-[12%] pointer-events-none">
-						<button
-							onclick={() => reset(true)}
-							class="pointer-events-auto px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
-							       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
-						>↺ Try Again</button>
-						<button
-							onclick={goToMenu}
-							class="pointer-events-auto px-6 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 active:scale-95
-							       text-slate-300 text-sm font-medium border border-slate-700/60 transition-all duration-150"
-						>← Menu</button>
+					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/75'}">
+						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
+						            {darkMode
+						                ? 'bg-slate-900/90 border border-slate-700/60'
+						                : 'bg-white/95 border border-slate-200/60'}">
+							<p class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
+							<button
+								onclick={() => reset(true)}
+								class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
+								       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
+							>↺ Try Again</button>
+							<button
+								onclick={goToMenu}
+								class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
+								       {darkMode
+								           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
+								           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
+							>← Main Menu</button>
+						</div>
 					</div>
 				{/if}
 			</div>

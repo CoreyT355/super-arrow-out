@@ -1,18 +1,21 @@
 <script lang="ts">
 	import { generateLevel } from '$lib/utils/puzzleGenerator';
-	import type { Direction, GridPos, Arrow } from '$lib/types';
+	import type { Direction, GridPos, Arrow, Level } from '$lib/types';
 	import { fly } from 'svelte/transition';
+	import { tick } from 'svelte';
+	import GeneratorWorker from '$lib/workers/puzzleGenerator.worker?worker';
 
 	// ─── difficulty config ───────────────────────────────────────────────────────
 
 	// cells: target cell count for adaptive grids; square: always use equal W/H
 	const DIFFICULTIES = [
-		{ label: 'Easy',       cells:    36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400', chartColor: '#10b981' },
-		{ label: 'Normal',     cells:    81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400',     chartColor: '#0ea5e9' },
-		{ label: 'Hard',       cells:   256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6' },
-		{ label: 'Super Hard', cells:  1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316' },
-		{ label: 'Expert',     cells:  4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48' },
-		{ label: 'Floor Boss', cells: 16384, square: false, color: 'from-yellow-400 to-amber-500',    ring: 'ring-yellow-300',  chartColor: '#f59e0b', hidden: true },
+		{ label: 'Easy',       cells:    36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400', chartColor: '#10b981', hidden: false },
+		{ label: 'Normal',     cells:    81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400',     chartColor: '#0ea5e9', hidden: false },
+		{ label: 'Hard',       cells:   256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6', hidden: false },
+		{ label: 'Super Hard', cells:  1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316', hidden: false },
+		{ label: 'Expert',     cells:  4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48', hidden: false },
+		{ label: 'Ludicrous', cells: 16384, square: false, color: 'from-fuchsia-500 to-fuchsia-600', ring: 'ring-fuchsia-400', chartColor: '#d946ef', hidden: false,
+		  bgStyle: 'background:repeating-linear-gradient(0deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),repeating-linear-gradient(90deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),linear-gradient(135deg,#d946ef,#a21caf)' },
 	];
 
 	const ENABLED_DIFFICULTIES = DIFFICULTIES.filter(d => !d.hidden);
@@ -89,6 +92,7 @@
 	// ─── game state ──────────────────────────────────────────────────────────────
 
 	let gameState = $state<'menu' | 'playing' | 'stats'>('menu');
+	let menuOpen = $state(false);
 	let W = $state(9);
 	let H = $state(9);
 
@@ -480,8 +484,23 @@
 
 	// ─── game control ────────────────────────────────────────────────────────────
 
-	function startGame(cells: number, square: boolean) {
+	function generateInWorker(w: number, h: number): Promise<Level> {
+		return new Promise((resolve) => {
+			const worker = new GeneratorWorker();
+			worker.onmessage = (e: MessageEvent<Level>) => {
+				resolve(e.data);
+				worker.terminate();
+			};
+			worker.postMessage({ w, h });
+		});
+	}
+
+	async function startGame(cells: number, square: boolean) {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+		gameState = 'playing';
+		showLoading = true;
+		await tick(); // flush DOM so the loading overlay paints before we kick off the worker
+
 		const { w, h } = computeGridSize(cells, square);
 		W = w; H = h;
 		removed           = new Set();
@@ -490,11 +509,11 @@
 		lives             = MAX_LIVES;
 		menuOpen          = false;
 		winCounted        = false;
-		currentDifficulty = ENABLED_DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
-		level             = generateLevel(w, h);
+		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
+		level             = await generateInWorker(w, h);
 		savePuzzle(level);
 		resetView();
-		gameState = 'playing';
+		showLoading = false;
 	}
 
 	// reuse=true  → restore the saved puzzle (Try Again after game-over)
@@ -556,7 +575,8 @@
 	let showGrid       = $state(_settings.showGrid);
 	let roundedCorners = $state(_settings.roundedCorners);
 	let darkMode       = $state(_settings.darkMode);
-	let menuOpen       = $state(false);
+	let showLoading = $state(false);
+	let menuSettingsOpen = $state(false);
 
 	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode }); });
 
@@ -598,10 +618,103 @@
 
 {#if gameState === 'menu'}
 	<!-- ─── Start screen ─────────────────────────────────────────────────────── -->
-	<main class="w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col items-center justify-center gap-6 p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+	<main class="relative w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+	      style="padding-top: max(1.5rem, env(safe-area-inset-top))">
+
+		<!-- Top row: gear button right-aligned -->
+		<div class="flex justify-end shrink-0">
+			<button
+				onclick={() => (menuSettingsOpen = true)}
+				class="flex items-center justify-center w-9 h-9 rounded-lg transition-colors
+				       {darkMode
+				           ? 'bg-slate-700 text-slate-100 hover:bg-slate-600 hover:text-white'
+				           : 'bg-slate-300 text-slate-800 hover:bg-slate-400 hover:text-slate-900'}"
+				aria-label="Settings"
+			>
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/>
+					<path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+				</svg>
+			</button>
+		</div>
+
+		<!-- Centered content -->
+		<div class="flex-1 flex flex-col items-center justify-center gap-6">
+
+		<!-- Settings overlay -->
+		{#if menuSettingsOpen}
+			<button
+				class="absolute inset-0 z-40 {darkMode ? 'bg-slate-950/50' : 'bg-slate-400/40'}"
+				onclick={() => (menuSettingsOpen = false)}
+				aria-label="Close settings"
+			></button>
+			<div
+				class="absolute z-50 w-72 flex flex-col gap-1 p-5 rounded-2xl shadow-2xl
+				       {darkMode
+				           ? 'bg-slate-800 border border-slate-700/60'
+				           : 'bg-white border border-slate-200'}"
+				transition:fly={{ y: 8, duration: 180, opacity: 0 }}
+			>
+				<p class="text-sm font-semibold {darkMode ? 'text-slate-300' : 'text-slate-600'} mb-2 tracking-wide uppercase">Settings</p>
+
+				<!-- Dark Mode -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm flex items-center gap-2">
+						{#if darkMode}
+							<svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M11 8.5A5 5 0 0 1 4.5 2a5 5 0 1 0 6.5 6.5z"/>
+							</svg>
+						{:else}
+							<svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+								<circle cx="6.5" cy="6.5" r="2.2"/>
+								<line x1="6.5" y1="1" x2="6.5" y2="0.1"/><line x1="6.5" y1="12" x2="6.5" y2="12.9"/>
+								<line x1="1" y1="6.5" x2="0.1" y2="6.5"/><line x1="12" y1="6.5" x2="12.9" y2="6.5"/>
+								<line x1="2.9" y1="2.9" x2="2.2" y2="2.2"/><line x1="10.1" y1="10.1" x2="10.8" y2="10.8"/>
+								<line x1="10.1" y1="2.9" x2="10.8" y2="2.2"/><line x1="2.9" y1="10.1" x2="2.2" y2="10.8"/>
+							</svg>
+						{/if}
+						Dark Mode
+					</span>
+					<button
+						role="switch" aria-checked={darkMode}
+						onclick={() => (darkMode = !darkMode)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {darkMode ? 'bg-emerald-500' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {darkMode ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
+
+				<!-- Show Grid -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Show Grid</span>
+					<button
+						role="switch" aria-checked={showGrid}
+						onclick={() => (showGrid = !showGrid)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {showGrid ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {showGrid ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
+
+				<!-- Rounded Corners -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Rounded Corners</span>
+					<button
+						role="switch" aria-checked={roundedCorners}
+						onclick={() => (roundedCorners = !roundedCorners)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {roundedCorners ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
+			</div>
+		{/if}
 		<div class="text-center">
 			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
-			<p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p>
+			<!-- <p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p> -->
 		</div>
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
@@ -612,6 +725,7 @@
 					class="group relative flex items-center py-4 px-5 rounded-2xl bg-gradient-to-br {d.color}
 					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
 					       ring-2 ring-transparent hover:{d.ring} focus-visible:{d.ring} focus-visible:outline-none"
+					style={'bgStyle' in d ? d.bgStyle : ''}
 				>
 					<!-- Label + grid size -->
 					<div class="flex flex-col items-start flex-1 min-w-0">
@@ -644,6 +758,8 @@
 			</svg>
 			Stats
 		</button>
+
+		</div><!-- end centered content -->
 	</main>
 
 {:else if gameState === 'stats'}
@@ -756,15 +872,20 @@
 			<!-- Spacer -->
 			<div class="flex-1"></div>
 
-			<!-- Hearts — always visible on every screen size -->
-			<div class="flex items-center gap-1.5 pr-1">
-				{#each Array(MAX_LIVES) as _, i}
-					<span
-						class="text-xl leading-none select-none transition-all duration-300
-						       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : darkMode ? 'text-slate-700' : 'text-slate-300'}"
-					>♥</span>
-				{/each}
-			</div>
+<!-- Hearts — always visible on every screen size -->
+<div class="flex items-center gap-4 pr-1">
+	<span class="text-sm font-medium {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+		{level.arrows.length - removed.size} arrows left
+	</span>
+	<div class="flex items-center gap-1.5">
+		{#each Array(MAX_LIVES) as _, i}
+			<span
+				class="text-xl leading-none select-none transition-all duration-300
+				       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : darkMode ? 'text-slate-700' : 'text-slate-300'}"
+			>♥</span>
+		{/each}
+	</div>
+</div>
 		</div>
 
 		<!-- Mobile overlay menu (floats over the board, doesn't push layout) -->
@@ -1015,6 +1136,16 @@
 
 				</svg>
 
+				<!-- Loading screen -->
+				{#if showLoading}
+					<div class="absolute inset-0 z-50 flex items-center justify-center {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/80'} backdrop-blur-sm">
+						<div class="flex flex-col items-center gap-4 text-center">
+							<div class="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
+							<p class="text-xl font-bold {darkMode ? 'text-white' : 'text-slate-900'}">Loading...</p>
+						</div>
+					</div>
+				{/if}
+
 				<!-- Win panel — centered HTML overlay, unaffected by zoom/pan -->
 				{#if won}
 					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}">
@@ -1022,7 +1153,16 @@
 						            {darkMode
 						                ? 'bg-slate-900/90 border border-slate-700/60'
 						                : 'bg-white/95 border border-slate-200/60'}">
-							<p class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
+							<div class="text-4xl mb-2">🎉</div>
+<p class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
+<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">All {level.arrows.length} arrows cleared</p>
+<div class="flex gap-1 mt-1">
+	{#each Array(MAX_LIVES) as _, i}
+		<span class="text-lg transition-all {i < lives ? 'text-red-500' : darkMode ? 'text-slate-700' : 'text-slate-300'}">
+			{i < lives ? '♥' : '♡'}
+		</span>
+	{/each}
+</div>
 							<button
 								onclick={() => reset(false)}
 								class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
@@ -1052,7 +1192,11 @@
 						            {darkMode
 						                ? 'bg-slate-900/90 border border-slate-700/60'
 						                : 'bg-white/95 border border-slate-200/60'}">
-							<p class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
+							<div class="text-4xl mb-2">💔</div>
+<p class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
+<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+	{level.arrows.length - removed.size} arrows left
+</p>
 							<button
 								onclick={() => reset(true)}
 								class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95

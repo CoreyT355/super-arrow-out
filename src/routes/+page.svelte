@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { generateLevel } from '$lib/utils/puzzleGenerator';
 	import type { Direction, GridPos, Arrow } from '$lib/types';
+	import { fly } from 'svelte/transition';
 
 	// ─── difficulty config ───────────────────────────────────────────────────────
 
@@ -613,7 +614,8 @@
 	<main class="w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
 
 		<!-- Top bar -->
-		<div class="h-12 shrink-0 flex items-center px-4 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm">
+		<div class="shrink-0 flex items-center px-4 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm"
+		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))">
 			<button
 				onclick={goToMenu}
 				class="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60
@@ -679,11 +681,12 @@
 
 {:else}
 	<!-- ─── Game screen ──────────────────────────────────────────────────────── -->
-	<main class="w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
+	<main class="relative w-full h-dvh bg-slate-900 flex flex-col overflow-hidden">
 
 		<!-- ── Top bar ──────────────────────────────────────────────────────────── -->
 		<!-- h-12 = 3rem fixed; shrink-0 prevents flex from squishing it -->
-		<div class="h-12 shrink-0 flex items-center gap-2 px-3 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm">
+		<div class="shrink-0 flex items-center gap-2 px-3 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm"
+		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))">
 
 			<!-- Mobile: hamburger button -->
 			<button
@@ -745,20 +748,34 @@
 			</div>
 		</div>
 
-		<!-- Mobile dropdown menu (slides in below top bar) -->
+		<!-- Mobile overlay menu (floats over the board, doesn't push layout) -->
 		{#if menuOpen}
-			<div class="sm:hidden shrink-0 flex flex-col gap-2 p-3 bg-slate-800/98 border-b border-slate-700/60">
+			<!-- Backdrop: tap anywhere outside the panel to close -->
+			<button
+				class="sm:hidden absolute inset-0 z-30 bg-slate-950/40"
+				style="top: calc(3rem + env(safe-area-inset-top))"
+				onclick={() => (menuOpen = false)}
+				aria-label="Close menu"
+			></button>
+
+			<!-- Panel: slides down from below the top bar -->
+			<div
+				class="sm:hidden absolute left-0 right-0 z-40 flex flex-col gap-2 p-3
+				       bg-slate-900/95 backdrop-blur-md border-b border-slate-700/60 shadow-xl"
+				style="top: calc(3rem + env(safe-area-inset-top))"
+				transition:fly={{ y: -6, duration: 160, opacity: 0 }}
+			>
 				<div class="flex gap-2">
 					<button
-						onclick={() => { goToMenu(); }}
-						class="flex-1 py-2.5 text-sm font-medium rounded-lg bg-slate-700 text-slate-300 hover:bg-slate-600 transition-colors"
+						onclick={() => { goToMenu(); menuOpen = false; }}
+						class="flex-1 py-2.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
 					>← Menu</button>
 					<button
 						onclick={() => { reset(lost); menuOpen = false; }}
 						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors
 						       {lost
 						           ? 'bg-red-600 text-white hover:bg-red-500'
-						           : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}"
+						           : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
 					>{lost ? '↺ Try Again' : 'Regenerate'}</button>
 				</div>
 				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
@@ -781,7 +798,7 @@
 		-->
 		<div class="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
 			<div
-				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem) * {W / H})); aspect-ratio: {W} / {H};"
+				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem - env(safe-area-inset-top)) * {W / H})); aspect-ratio: {W} / {H};"
 				class="relative overflow-hidden rounded-xl touch-none"
 				use:panZoomAction
 			>

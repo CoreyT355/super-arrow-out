@@ -15,6 +15,8 @@
 		{ label: 'Floor Boss', cells: 16384, square: false, color: 'from-yellow-400 to-amber-500',    ring: 'ring-yellow-300',  chartColor: '#f59e0b', hidden: true },
 	];
 
+	const ENABLED_DIFFICULTIES = DIFFICULTIES.filter(d => !d.hidden);
+
 	// Compute W × H for a difficulty, fitting the current viewport aspect ratio.
 	function computeGridSize(cells: number, square: boolean): { w: number; h: number } {
 		const s = Math.round(Math.sqrt(cells));
@@ -488,7 +490,7 @@
 		lives             = MAX_LIVES;
 		menuOpen          = false;
 		winCounted        = false;
-		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
+		currentDifficulty = ENABLED_DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
 		level             = generateLevel(w, h);
 		savePuzzle(level);
 		resetView();
@@ -535,9 +537,9 @@
 
 	const chartSegments = $derived(
 		(() => {
-			const total = DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0);
+			const total = ENABLED_DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0);
 			let cumFrac = 0;
-			return DIFFICULTIES.map(d => {
+			return ENABLED_DIFFICULTIES.map(d => {
 				const count  = progress[d.label] ?? 0;
 				const frac   = total > 0 ? count / total : 0;
 				const angle  = cumFrac * 360 - 90; // -90° → start segment at 12 o'clock
@@ -548,7 +550,7 @@
 		})()
 	);
 
-	const totalWins = $derived(DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
+	const totalWins = $derived(ENABLED_DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
 
 	const _settings    = loadSettings();
 	let showGrid       = $state(_settings.showGrid);
@@ -598,12 +600,12 @@
 	<!-- ─── Start screen ─────────────────────────────────────────────────────── -->
 	<main class="w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col items-center justify-center gap-6 p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
 		<div class="text-center">
-			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Arrow Out</h1>
+			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
 			<p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p>
 		</div>
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
-			{#each DIFFICULTIES.filter(d => !d.hidden) as d}
+			{#each ENABLED_DIFFICULTIES as d}
 				{@const count = progress[d.label] ?? 0}
 				<button
 					onclick={() => startGame(d.cells, d.square)}

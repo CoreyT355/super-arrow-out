@@ -1068,6 +1068,9 @@
 						                : 'bg-white/95 border border-slate-200/60'}">
 							<div class="text-4xl mb-2">💔</div>
 <p class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
+<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+	{level.arrows.length - removed.size} arrows left
+</p>
 							<button
 								onclick={() => reset(true)}
 								class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95

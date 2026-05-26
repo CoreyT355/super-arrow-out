@@ -6,11 +6,12 @@
 
 	// cells: target cell count for adaptive grids; square: always use equal W/H
 	const DIFFICULTIES = [
-		{ label: 'Easy',       cells:   36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400', chartColor: '#10b981' },
-		{ label: 'Normal',     cells:   81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400',     chartColor: '#0ea5e9' },
-		{ label: 'Hard',       cells:  256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6' },
-		{ label: 'Super Hard', cells: 1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316' },
-		{ label: 'Expert',     cells: 4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48' },
+		{ label: 'Easy',       cells:    36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400', chartColor: '#10b981' },
+		{ label: 'Normal',     cells:    81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400',     chartColor: '#0ea5e9' },
+		{ label: 'Hard',       cells:   256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6' },
+		{ label: 'Super Hard', cells:  1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316' },
+		{ label: 'Expert',     cells:  4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48' },
+		{ label: 'Floor Boss', cells: 16384, square: false, color: 'from-yellow-400 to-amber-500',    ring: 'ring-yellow-300',  chartColor: '#f59e0b' },
 	];
 
 	// Compute W × H for a difficulty, fitting the current viewport aspect ratio.

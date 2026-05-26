@@ -33,8 +33,9 @@
 
 	// ─── local-storage helpers ──────────────────────────────────────────────────
 
-	const STORAGE_KEY  = 'arrow-out-progress';
-	const PUZZLE_KEY   = 'arrow-out-puzzle';
+	const STORAGE_KEY   = 'arrow-out-progress';
+	const PUZZLE_KEY    = 'arrow-out-puzzle';
+	const SETTINGS_KEY  = 'arrow-out-settings';
 
 	// Returns {} on server (SSR) or on parse error.
 	function loadProgress(): Record<string, number> {
@@ -60,6 +61,23 @@
 			const raw = localStorage.getItem(PUZZLE_KEY);
 			return raw ? JSON.parse(raw) : null;
 		} catch { return null; }
+	}
+
+	function loadSettings(): { showGrid: boolean; roundedCorners: boolean } {
+		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true };
+		try {
+			const raw = localStorage.getItem(SETTINGS_KEY);
+			const parsed = raw ? JSON.parse(raw) : {};
+			return {
+				showGrid:       parsed.showGrid       ?? true,
+				roundedCorners: parsed.roundedCorners ?? true,
+			};
+		} catch { return { showGrid: true, roundedCorners: true }; }
+	}
+
+	function saveSettings(s: { showGrid: boolean; roundedCorners: boolean }) {
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 	}
 
 	// Initialise from storage immediately on the client (guard keeps SSR safe).
@@ -531,9 +549,12 @@
 
 	const totalWins = $derived(DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
 
-	let showGrid       = $state(true);
-	let roundedCorners = $state(true);
+	const _settings    = loadSettings();
+	let showGrid       = $state(_settings.showGrid);
+	let roundedCorners = $state(_settings.roundedCorners);
 	let menuOpen       = $state(false);
+
+	$effect(() => { saveSettings({ showGrid, roundedCorners }); });
 
 	// Pre-compute SVG path strings and head positions for every arrow at s=0.
 	// These are used by the static (non-animating) render branch so idle arrows
@@ -689,9 +710,9 @@
 		<div class="shrink-0 flex items-center gap-2 px-3 border-b border-slate-800/80 bg-slate-900/95 backdrop-blur-sm"
 		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))">
 
-			<!-- Mobile: hamburger button -->
+			<!-- Hamburger button — always visible -->
 			<button
-				class="sm:hidden flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 text-slate-400
+				class="flex items-center justify-center w-9 h-9 rounded-lg bg-slate-800 text-slate-400
 				       hover:bg-slate-700 hover:text-white transition-colors active:scale-95"
 				onclick={() => (menuOpen = !menuOpen)}
 				aria-label={menuOpen ? 'Close menu' : 'Open menu'}
@@ -711,30 +732,6 @@
 				{/if}
 			</button>
 
-			<!-- Desktop: inline controls -->
-			<div class="hidden sm:flex items-center gap-2">
-				<button
-					onclick={goToMenu}
-					class="px-3 py-1.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-400 border border-slate-700/60
-					       hover:bg-slate-700 hover:text-slate-200 transition-colors"
-				>← Menu</button>
-				<button
-					onclick={() => reset(lost)}
-					class="px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors
-					       {lost
-					           ? 'bg-red-600 text-white border-red-500 hover:bg-red-500'
-					           : 'bg-slate-800 text-slate-300 border-slate-700/60 hover:bg-slate-700'}"
-				>{lost ? '↺ Try Again' : 'Regenerate'}</button>
-				<label class="flex items-center gap-1.5 cursor-pointer select-none text-slate-400 text-sm">
-					<input type="checkbox" bind:checked={showGrid} class="w-3.5 h-3.5 rounded accent-slate-400 cursor-pointer" />
-					Grid
-				</label>
-				<label class="flex items-center gap-1.5 cursor-pointer select-none text-slate-400 text-sm">
-					<input type="checkbox" bind:checked={roundedCorners} class="w-3.5 h-3.5 rounded accent-slate-400 cursor-pointer" />
-					Rounded
-				</label>
-			</div>
-
 			<!-- Spacer -->
 			<div class="flex-1"></div>
 
@@ -753,7 +750,7 @@
 		{#if menuOpen}
 			<!-- Backdrop: tap anywhere outside the panel to close -->
 			<button
-				class="sm:hidden absolute inset-0 z-30 bg-slate-950/40"
+				class="absolute inset-0 z-30 bg-slate-950/40"
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				onclick={() => (menuOpen = false)}
 				aria-label="Close menu"
@@ -761,7 +758,7 @@
 
 			<!-- Panel: slides down from below the top bar -->
 			<div
-				class="sm:hidden absolute left-0 right-0 z-40 flex flex-col gap-2 p-3
+				class="absolute left-0 right-0 z-40 flex flex-col gap-2 p-3
 				       bg-slate-900/95 backdrop-blur-md border-b border-slate-700/60 shadow-xl"
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				transition:fly={{ y: -6, duration: 160, opacity: 0 }}
@@ -770,22 +767,55 @@
 					<button
 						onclick={() => { goToMenu(); menuOpen = false; }}
 						class="flex-1 py-2.5 text-sm font-medium rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
-					>← Menu</button>
+					>← Main Menu</button>
 					<button
 						onclick={() => { reset(lost); menuOpen = false; }}
-						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors
+						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5
 						       {lost
 						           ? 'bg-red-600 text-white hover:bg-red-500'
 						           : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
-					>{lost ? '↺ Try Again' : 'Regenerate'}</button>
+					>
+						{#if lost}
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M1 7a6 6 0 1 0 1.2-3.6"/><polyline points="1 2 1 5.5 4.5 5.5"/>
+							</svg>
+							Try Again
+						{:else}
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M13 2v3.5H9.5"/><path d="M1 7a6 6 0 0 1 10.2-4.3L13 5.5"/>
+								<path d="M1 12v-3.5H4.5"/><path d="M13 7a6 6 0 0 1-10.2 4.3L1 8.5"/>
+							</svg>
+							Regenerate Puzzle
+						{/if}
+					</button>
 				</div>
-				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
-					<input type="checkbox" bind:checked={showGrid} class="w-4 h-4 rounded accent-slate-400 cursor-pointer" />
-					Show Grid
+				<!-- Toggle: Show Grid -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+					<span class="text-slate-300 text-sm">Show Grid</span>
+					<button
+						role="switch"
+						aria-checked={showGrid}
+						onclick={() => (showGrid = !showGrid)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {showGrid ? 'bg-emerald-500' : 'bg-slate-600'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
+						             {showGrid ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
 				</label>
-				<label class="flex items-center gap-2 cursor-pointer select-none text-slate-400 text-sm px-1">
-					<input type="checkbox" bind:checked={roundedCorners} class="w-4 h-4 rounded accent-slate-400 cursor-pointer" />
-					Rounded Corners
+				<!-- Toggle: Rounded Corners -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+					<span class="text-slate-300 text-sm">Rounded Corners</span>
+					<button
+						role="switch"
+						aria-checked={roundedCorners}
+						onclick={() => (roundedCorners = !roundedCorners)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {roundedCorners ? 'bg-emerald-500' : 'bg-slate-600'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
+						             {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
 				</label>
 			</div>
 		{/if}

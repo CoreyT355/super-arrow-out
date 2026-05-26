@@ -756,15 +756,20 @@
 			<!-- Spacer -->
 			<div class="flex-1"></div>
 
-			<!-- Hearts — always visible on every screen size -->
-			<div class="flex items-center gap-1.5 pr-1">
-				{#each Array(MAX_LIVES) as _, i}
-					<span
-						class="text-xl leading-none select-none transition-all duration-300
-						       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : darkMode ? 'text-slate-700' : 'text-slate-300'}"
-					>♥</span>
-				{/each}
-			</div>
+<!-- Hearts — always visible on every screen size -->
+<div class="flex items-center gap-4 pr-1">
+	<span class="text-sm font-medium {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+		{level.arrows.length - removed.size} arrows left
+	</span>
+	<div class="flex items-center gap-1.5">
+		{#each Array(MAX_LIVES) as _, i}
+			<span
+				class="text-xl leading-none select-none transition-all duration-300
+				       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : darkMode ? 'text-slate-700' : 'text-slate-300'}"
+			>♥</span>
+		{/each}
+	</div>
+</div>
 		</div>
 
 		<!-- Mobile overlay menu (floats over the board, doesn't push layout) -->
@@ -1022,7 +1027,16 @@
 						            {darkMode
 						                ? 'bg-slate-900/90 border border-slate-700/60'
 						                : 'bg-white/95 border border-slate-200/60'}">
-							<p class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
+							<div class="text-4xl mb-2">🎉</div>
+<p class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
+<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">All {level.arrows.length} arrows cleared</p>
+<div class="flex gap-1 mt-1">
+	{#each Array(MAX_LIVES) as _, i}
+		<span class="text-lg transition-all {i < lives ? 'text-red-500' : darkMode ? 'text-slate-700' : 'text-slate-300'}">
+			{i < lives ? '♥' : '♡'}
+		</span>
+	{/each}
+</div>
 							<button
 								onclick={() => reset(false)}
 								class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
@@ -1052,7 +1066,8 @@
 						            {darkMode
 						                ? 'bg-slate-900/90 border border-slate-700/60'
 						                : 'bg-white/95 border border-slate-200/60'}">
-							<p class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
+							<div class="text-4xl mb-2">💔</div>
+<p class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
 							<button
 								onclick={() => reset(true)}
 								class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95

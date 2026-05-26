@@ -874,9 +874,11 @@
 
 <!-- Hearts — always visible on every screen size -->
 <div class="flex items-center gap-4 pr-1">
-	<span class="text-sm font-medium {darkMode ? 'text-slate-400' : 'text-slate-500'}">
-		{level.arrows.length - removed.size} arrows left
-	</span>
+	{#if !showLoading}
+		<span class="text-sm font-medium {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+			{level.arrows.length - removed.size} arrows left
+		</span>
+	{/if}
 	<div class="flex items-center gap-1.5">
 		{#each Array(MAX_LIVES) as _, i}
 			<span

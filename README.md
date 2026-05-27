@@ -16,8 +16,11 @@ Clear every snake to win the level.
 - **Tap** an arrow to launch it
 - **Pinch / scroll** to zoom in on larger grids
 - **Drag** to pan around when zoomed
+- **Tab / Enter** — keyboard play, on Easy and Normal only
 
 **Lives** — you have 3 hearts per puzzle. Each blocked move costs one. Lose all three and the level ends; tap **Try Again** to replay the exact same puzzle.
+
+**Accessibility** — Easy and Normal are keyboard- and screen-reader-friendly: Tab cycles through snakes in reading order, Enter or Space launches the focused snake, and each is announced with its color, position, direction, and blocked/clear state. Larger grids (Hard and above) require pointer/touch input — Tab-cycling through hundreds of snakes isn't a viable navigation model. The app also respects the OS `prefers-reduced-motion` setting and meets WCAG 2.1 AA for contrast, touch targets, and focus management.
 
 ---
 

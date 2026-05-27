@@ -26,3 +26,10 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .animate-shake { animation: none !important; }
 }
+
+/* Suppress the browser's default focus outline on focusable arrow groups.
+   The yellow rect overlay rendered inside the SVG is the visible indicator;
+   the browser outline (sometimes a black ring around the bounding box) is
+   inconsistent across browsers on SVG <g> elements. */
+.arrow-focusable:focus { outline: none; }
+.arrow-focusable:focus-visible { outline: none; }

@@ -488,6 +488,14 @@
 
 	// ─── click handler ───────────────────────────────────────────────────────────
 
+	// Reference to the board <svg> so we can move focus to it post-launch.
+	// Keyboard model: each move is deliberate — focus does NOT auto-advance to
+	// the next snake. Instead it lands on the board container, which announces
+	// "X snakes remaining" via its aria-label. The user then presses Tab to
+	// re-engage with the snake list, landing on the first snake in reading
+	// order. This matches the pointer flow where every tap is its own decision.
+	let boardSvg = $state<SVGSVGElement | null>(null);
+
 	function handleClick(id: number) {
 		if (_didMove) return; // swallow taps that ended a pan gesture
 		if (won || lives <= 0) return; // game already decided
@@ -498,6 +506,22 @@
 		const { blocked, dist } = checkBlocked(arrow);
 		const t = performance.now();
 		now = t;
+
+		// Keyboard nav: if this launch is for the currently-focused arrow, shift
+		// focus to the board container after Svelte commits the render where the
+		// static <g> for this snake disappears. The board's role="application"
+		// label is reactive ("N snakes remaining") so SR users hear the result.
+		// Skipped for pointer-only flows (focusedArrowId is null) and on blocked
+		// arrows (focus naturally stays put — the snake bounces back, doesn't
+		// leave the DOM).
+		if (keyboardEnabled && focusedArrowId === id && !blocked) {
+			tick().then(() => {
+				// Clear explicitly — the launched snake's <g> may unmount before
+				// the browser dispatches focusout, leaving the focus rect orphaned.
+				focusedArrowId = null;
+				boardSvg?.focus();
+			});
+		}
 
 		if (!blocked) {
 			// Compute drain metadata up-front: build the extended route and
@@ -683,9 +707,27 @@
 	const COLORS_DARK  = ['#f87171','#60a5fa','#4ade80','#c084fc','#fb923c','#f472b6','#facc15','#2dd4bf','#22d3ee','#a3e635'];
 	const COLORS_LIGHT = ['#dc2626','#2563eb','#16a34a','#9333ea','#ea580c','#db2777','#a16207','#0d9488','#0891b2','#65a30d'];
 
+	// Verbal color names for screen-reader labels. Index aligned with the palettes.
+	const COLOR_NAMES  = ['red','blue','green','purple','orange','pink','yellow','teal','cyan','lime'];
+
+	// Spoken direction word for screen-reader labels. SR users hear "pointing
+	// right" rather than the cardinal letter.
+	const DIR_WORD: Record<Direction, string> = { N: 'up', S: 'down', E: 'right', W: 'left' };
+
 	function themeColor(id: number): string {
 		return (darkMode ? COLORS_DARK : COLORS_LIGHT)[id % 10];
 	}
+
+	function colorName(id: number): string {
+		return COLOR_NAMES[id % 10];
+	}
+
+	// Keyboard / screen-reader board navigation is supported only on Easy and
+	// Normal. On larger grids Tab-cycling through hundreds of arrows is unusable
+	// in practice — we acknowledge this explicitly in the menu and README.
+	const keyboardEnabled = $derived(
+		currentDifficulty === 'Easy' || currentDifficulty === 'Normal',
+	);
 
 	// Pre-compute SVG path strings and head positions for every arrow at s=0.
 	// These are used by the static (non-animating) render branch so idle arrows
@@ -695,6 +737,51 @@
 			arrow.id,
 			{ d: roundedPath(arrow.path, roundedCorners ? 0.4 : 0), head: arrow.path[0] },
 		]))
+	);
+
+	// ─── keyboard / screen-reader board nav (Easy + Normal only) ─────────────────
+
+	// Currently-focused arrow id, or null when nothing is focused. Drives the
+	// yellow focus-rect overlay rendered as a sibling of the arrow groups.
+	let focusedArrowId = $state<number | null>(null);
+
+	// Build the screen-reader label for a single arrow. Calls checkBlocked()
+	// which is O(n × path-length); see arrowLabels below for why this is fine.
+	function arrowLabel(arrow: Arrow): string {
+		const { blocked } = checkBlocked(arrow);
+		const head = arrow.path[0];
+		const count = arrow.path.length;
+		return `Snake ${arrow.id}: ${colorName(arrow.id)}, ` +
+			`${count} cell${count === 1 ? '' : 's'}, ` +
+			`head at column ${head.x + 1} row ${head.y + 1}, ` +
+			`pointing ${DIR_WORD[arrow.direction]}, ` +
+			`${blocked ? 'blocked' : 'clear'}`;
+	}
+
+	// Cached label map. Recomputes when level / removed / anims change — i.e.
+	// once per game-state change, not once per RAF tick. On 9×9 (~20 snakes)
+	// this is ~1200 ops per change; negligible.
+	const arrowLabels = $derived.by(() => {
+		if (!keyboardEnabled) return {} as Record<number, string>;
+		// Touch the reactive sets so the derived re-runs when they change.
+		void anims; void removed;
+		const out: Record<number, string> = {};
+		for (const a of level.arrows) {
+			if (!removed.has(a.id)) out[a.id] = arrowLabel(a);
+		}
+		return out;
+	});
+
+	// Reading-order view of arrows (top-to-bottom, left-to-right by head cell).
+	// Used as the Tab cycling order when keyboardEnabled. Falls through to the
+	// original array on Hard+ so render order matches the existing behaviour.
+	const orderedArrows = $derived(
+		keyboardEnabled
+			? [...level.arrows].sort((a, b) => {
+				const ah = a.path[0], bh = b.path[0];
+				return ah.y - bh.y || ah.x - bh.x;
+			})
+			: level.arrows,
 	);
 
 	const won  = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
@@ -812,6 +899,14 @@
 				</button>
 			{/each}
 		</div>
+
+		<!-- Accessibility note. Easy and Normal are keyboard- and screen-reader-
+		     friendly. Larger grids are designed around pointer/touch input —
+		     Tab-cycling through hundreds of snakes is unusable in practice. -->
+		<p class="text-xs {darkMode ? 'text-slate-500' : 'text-slate-400'} text-center max-w-xs leading-relaxed">
+			Easy and Normal support keyboard and screen-reader play.<br>
+			Larger grids require pointer input.
+		</p>
 
 		</div><!-- end centered content -->
 
@@ -1316,11 +1411,37 @@
 				class="relative overflow-hidden rounded-xl touch-none"
 				use:panZoomAction
 			>
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+				<!-- The SVG gets tabindex=-1 (programmatically focusable, not in tab
+				     cycle) only when keyboardEnabled. role="application" makes it
+				     interactive in practice, but the static checker doesn't see the
+				     dynamic role attribute. -->
 				<svg
+					bind:this={boardSvg}
 					viewBox={svgViewBox}
 					preserveAspectRatio="none"
 					style="width:100%;height:100%;"
 					overflow="hidden"
+					role={keyboardEnabled ? 'application' : undefined}
+					aria-label={keyboardEnabled
+						? `Arrow puzzle board, ${W} by ${H} grid, ${level.arrows.length - removed.size} snakes remaining`
+						: undefined}
+					tabindex={keyboardEnabled ? -1 : undefined}
+					onfocusin={(e) => {
+						// Delegated focus tracking. focusin bubbles through SVG;
+						// per-element onfocus on <g> is unreliable across browsers.
+						// If a snake is the target, track it. If anything else
+						// inside the board takes focus (e.g. the board itself
+						// after a launch), clear the focus rect.
+						const target = e.target as Element | null;
+						const idAttr = target?.getAttribute?.('data-arrow-id');
+						focusedArrowId = idAttr ? Number(idAttr) : null;
+					}}
+					onfocusout={(e) => {
+						const target = e.target as Element | null;
+						const idAttr = target?.getAttribute?.('data-arrow-id');
+						if (idAttr && focusedArrowId === Number(idAttr)) focusedArrowId = null;
+					}}
 				>
 					<!-- Grid background: single SVG pattern — no per-cell rects needed.
 					     Rect covers exactly the grid area (0 0 W H) so the -0.1 viewBox
@@ -1337,7 +1458,7 @@
 
 					<!-- Arrows: split static vs animating so RAF ticks only re-render
 					     the 1–2 arrows that are actively sliding. -->
-					{#each level.arrows as arrow (arrow.id)}
+					{#each orderedArrows as arrow (arrow.id)}
 						{#if !removed.has(arrow.id)}
 							{#if anims[arrow.id]}
 								{@const anim = anims[arrow.id]}
@@ -1399,11 +1520,34 @@
 									</g>
 								{/if}
 							{:else}
-								<!-- Static branch: pre-computed paths, zero per-frame cost -->
+								<!-- Static branch: pre-computed paths, zero per-frame cost.
+								     On Easy/Normal this group is focusable via Tab and
+								     announces an aria-label like "Snake 7: red, 3 cells,
+								     head at column 2 row 1, pointing right, clear". -->
 								{@const sd        = staticArrowData[arrow.id]}
 								{@const penalized = markedRed.has(arrow.id)}
 								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
-								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer" opacity={0.95}>
+								<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+								<!-- The <g> is given role="button" + tabindex=0 only when
+								     keyboardEnabled (Easy/Normal). The static checker can't
+								     see the dynamic role attribute, so we silence here. -->
+								<g
+									onclick={() => handleClick(arrow.id)}
+									onkeydown={(e) => {
+										if (!keyboardEnabled) return;
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											handleClick(arrow.id);
+										}
+									}}
+									tabindex={keyboardEnabled ? 0 : -1}
+									role={keyboardEnabled ? 'button' : undefined}
+									aria-label={keyboardEnabled ? arrowLabels[arrow.id] : undefined}
+									data-arrow-id={arrow.id}
+									class="arrow-focusable"
+									style="cursor:pointer"
+									opacity={0.95}
+								>
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
 									{/each}
@@ -1424,6 +1568,24 @@
 							{/if}
 						{/if}
 					{/each}
+
+					<!-- Keyboard focus indicator: yellow stroke rect over the focused
+					     arrow's head cell. Rendered after all arrow groups so it sits
+					     on top; pointer-events:none so it doesn't intercept clicks. -->
+					{#if focusedArrowId !== null && keyboardEnabled}
+						{@const focused = level.arrows.find(a => a.id === focusedArrowId)}
+						{#if focused && !removed.has(focused.id)}
+							{@const h = focused.path[0]}
+							<rect
+								x={h.x + 0.04} y={h.y + 0.04} width={0.92} height={0.92}
+								rx="0.2"
+								fill="none"
+								stroke="#fbbf24"
+								stroke-width="0.08"
+								pointer-events="none"
+							/>
+						{/if}
+					{/if}
 
 				<!-- Vortex collapse — star particles spiral into the board centre on win -->
 				<!-- Phase 1 (0–600ms): stars fade in from nothing, static              -->

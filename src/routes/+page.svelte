@@ -676,7 +676,7 @@
 			// Spawn star particles spread across the board, spiraling inward
 			const cx = W / 2, cy = H / 2;
 			const count = Math.min(80, Math.max(24, level.arrows.length * 3));
-			const palette = darkMode ? COLORS_DARK : COLORS_LIGHT;
+			const palette = COLORS_DARK; // bright pastels pop on both light and dark backgrounds
 			vortexParticles = Array.from({ length: count }, (_, i) => {
 				const px = Math.random() * W;
 				const py = Math.random() * H;

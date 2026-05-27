@@ -13,21 +13,15 @@ html, body {
 
 @theme {
   --animate-shake: shake 0.25s ease-in-out;
-  --animate-spin-slow: spin-slow 2s linear infinite;
 
   @keyframes shake {
     0%, 100% { transform: translateX(0); }
     20%, 60% { transform: translateX(-4px); }
     40%, 80% { transform: translateX(4px); }
   }
-
-  @keyframes spin-slow {
-    to { transform: rotate(360deg); }
-  }
 }
 
-/* When the user has OS-level reduce-motion enabled, neutralise motion utilities. */
+/* When the user has OS-level reduce-motion enabled, neutralise the shake utility. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-shake     { animation: none !important; }
-  .animate-spin-slow { animation: none !important; }
+  .animate-shake { animation: none !important; }
 }

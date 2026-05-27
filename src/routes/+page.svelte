@@ -639,12 +639,14 @@
 		winCounted   = false;
 		lostCounted  = false;
 		regenerating = true;
+		menuOpen     = false;
+		showLoading  = true;
 		await tick();
 		level = await generateInWorker(W, H);
 		savePuzzle(level);
 		resetView();
+		showLoading  = false;
 		regenerating = false;
-		menuOpen     = false;
 	}
 
 	function goToMenu() {
@@ -1225,14 +1227,11 @@
 							</svg>
 							Try Again
 						{:else}
-							<svg
-								width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-								class={regenerating ? 'animate-spin-slow' : ''}
-							>
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 								<path d="M13 2v3.5H9.5"/><path d="M1 7a6 6 0 0 1 10.2-4.3L13 5.5"/>
 								<path d="M1 12v-3.5H4.5"/><path d="M13 7a6 6 0 0 1-10.2 4.3L1 8.5"/>
 							</svg>
-							{regenerating ? 'Generating…' : 'Regenerate Puzzle'}
+							Regenerate Puzzle
 						{/if}
 					</button>
 				</div>

@@ -166,7 +166,8 @@
 	let roundedCorners = $state(_settings.roundedCorners);
 	let darkMode       = $state(_settings.darkMode);
 	let winAnimation   = $state(_settings.winAnimation);
-	let showLoading = $state(false);
+	let showLoading    = $state(false);
+	let regenerating   = $state(false);
 	let menuSettingsOpen = $state(false);
 
 	// OS-level reduce-motion preference. Reactive — picks up live changes from
@@ -607,8 +608,8 @@
 		showLoading = false;
 	}
 
-	// reuse=true  → restore the saved puzzle (Try Again after game-over)
-	// reuse=false → generate a fresh puzzle and save it (Regenerate)
+	// reuse=true  → restore the saved puzzle (Try Again / New Level)
+	// reuse=false → generate a fresh puzzle synchronously (win-panel New Level)
 	function reset(reuse = false) {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
 		removed    = new Set();
@@ -624,6 +625,28 @@
 			savePuzzle(level);
 		}
 		resetView();
+	}
+
+	// Generate a fresh puzzle in the worker and swap it in — used by the
+	// in-game Regenerate button so the icon can spin during generation.
+	async function regeneratePuzzle() {
+		if (regenerating) return;
+		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+		removed      = new Set();
+		markedRed    = new Set();
+		anims        = {};
+		lives        = MAX_LIVES;
+		winCounted   = false;
+		lostCounted  = false;
+		regenerating = true;
+		menuOpen     = false;
+		showLoading  = true;
+		await tick();
+		level = await generateInWorker(W, H);
+		savePuzzle(level);
+		resetView();
+		showLoading  = false;
+		regenerating = false;
 	}
 
 	function goToMenu() {
@@ -1188,8 +1211,10 @@
 						           : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'}"
 					>← Main Menu</button>
 					<button
-						onclick={() => { reset(lost); menuOpen = false; }}
+						onclick={() => lost ? (reset(true), menuOpen = false) : regeneratePuzzle()}
+						disabled={regenerating}
 						class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5
+						       disabled:opacity-60 disabled:cursor-not-allowed
 						       {lost
 						           ? 'bg-red-600 text-white hover:bg-red-500'
 						           : darkMode

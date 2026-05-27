@@ -21,8 +21,7 @@ html, body {
   }
 }
 
-/* When the user has OS-level reduce-motion enabled, neutralise the shake
-   utility. (Currently unused, but kept reduced-motion-safe for the future.) */
+/* When the user has OS-level reduce-motion enabled, neutralise the shake utility. */
 @media (prefers-reduced-motion: reduce) {
   .animate-shake { animation: none !important; }
 }

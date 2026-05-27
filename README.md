@@ -30,6 +30,7 @@ Clear every snake to win the level.
 | Hard | ~11 × 22 | Starts requiring planned order |
 | Super Hard | ~23 × 45 | Zoom and pan essential |
 | Expert | ~46 × 89 | One for the patient |
+| Ludicrous | ~91 × 179 | Not for the faint-hearted |
 
 Grid dimensions adapt to your screen's aspect ratio on non-square modes.
 
@@ -38,14 +39,19 @@ Grid dimensions adapt to your screen's aspect ratio on non-square modes.
 ## Features
 
 - **Procedural puzzles** — every level is generated fresh; no two games are the same
+- **Background puzzle generation** — levels are built in a Web Worker so the UI stays responsive; a loading screen covers the wait on larger grids
 - **3-life system** — blocked arrows bounce back with a red flash and cost a heart
 - **Try Again** — replays the exact same generated layout (saved to `localStorage`)
+- **Regenerate Puzzle** — swap in a fresh random puzzle at any time from the in-game menu
 - **Progress tracking** — wins per difficulty are persisted locally and shown on the menu
 - **Stats screen** — donut chart breaking down your win history by difficulty, plus current and best win streak
 - **Win streak** — consecutive wins without a loss are tracked across sessions; resets on any failed puzzle
 - **Win animation** — sparkle particles spiral into a vortex when you clear the board (can be disabled in settings)
 - **Pinch-to-zoom** — full pan and zoom on larger grids, mobile-optimised
 - **Smooth animations** — rounded snake paths, eased nudge/bounce, per-frame RAF loop
+- **Reduced-motion support** — respects `prefers-reduced-motion: reduce`; vortex and nudge animations are suppressed while drain animations keep running as core gameplay feedback
+- **Accessibility** — ARIA roles on all overlays, focus trapping in modals, live-region announcements for lives lost and arrows remaining, screen-reader label on the stats donut chart
+- **PWA-ready** — installable as a standalone app on mobile and desktop via the web manifest
 - **Settings** — dark mode, grid lines, rounded corners, and win animation toggle; accessible from both the menu and mid-game
 
 ---
@@ -56,6 +62,7 @@ Grid dimensions adapt to your screen's aspect ratio on non-square modes.
 - [Tailwind CSS v4](https://tailwindcss.com)
 - SVG rendering — all game graphics are inline SVG, no canvas
 - TypeScript throughout
+- Web Workers for off-main-thread puzzle generation
 - `localStorage` for progress and puzzle persistence (SSR-safe)
 
 ---
@@ -82,13 +89,16 @@ pnpm check      # svelte-check + TypeScript
 ```
 src/
 ├── lib/
-│   ├── types.ts                # Arrow, Level, Direction, GridPos
-│   └── utils/
-│       └── puzzleGenerator.ts  # Procedural level generator
+│   ├── types.ts                              # Arrow, Level, Direction, GridPos
+│   ├── utils/
+│   │   ├── puzzleGenerator.ts               # Procedural level generator
+│   │   └── trapFocus.ts                     # Svelte action: focus trap for modals
+│   └── workers/
+│       └── puzzleGenerator.worker.ts        # Web Worker wrapper for off-thread generation
 └── routes/
     ├── +layout.svelte
-    ├── layout.css              # Global styles, Tailwind import, mobile scroll lock
-    └── +page.svelte            # Entire game — menu, play, stats screens
+    ├── layout.css                            # Global styles, Tailwind import, mobile scroll lock
+    └── +page.svelte                          # Entire game — menu, play, stats screens
 ```
 
 The puzzle generator fills a grid using a constrained random walk, rejects placements that strand cells into pockets too small for a valid arrow, and absorbs any short stubs into adjacent tails as a safety net.

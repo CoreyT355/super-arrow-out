@@ -726,7 +726,7 @@
 		<div class="flex justify-end shrink-0">
 			<button
 				onclick={() => (menuSettingsOpen = true)}
-				class="flex items-center justify-center w-9 h-9 rounded-lg transition-colors
+				class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
 				       {darkMode
 				           ? 'bg-slate-700 text-slate-100 hover:bg-slate-600 hover:text-white'
 				           : 'bg-slate-300 text-slate-800 hover:bg-slate-400 hover:text-slate-900'}"
@@ -759,7 +759,12 @@
 				<p class="text-sm font-semibold {darkMode ? 'text-slate-300' : 'text-slate-600'} mb-2 tracking-wide uppercase">Settings</p>
 
 				<!-- Dark Mode -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+				<button
+					role="switch" aria-checked={darkMode}
+					onclick={() => (darkMode = !darkMode)}
+					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm flex items-center gap-2">
 						{#if darkMode}
 							<svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -776,54 +781,61 @@
 						{/if}
 						Dark Mode
 					</span>
-					<button
-						role="switch" aria-checked={darkMode}
-						onclick={() => (darkMode = !darkMode)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {darkMode ? 'bg-emerald-500' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {darkMode ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 
 				<!-- Show Grid -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+				<button
+					role="switch" aria-checked={showGrid}
+					onclick={() => (showGrid = !showGrid)}
+					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Show Grid</span>
-					<button
-						role="switch" aria-checked={showGrid}
-						onclick={() => (showGrid = !showGrid)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {showGrid ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {showGrid ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 
 				<!-- Rounded Corners -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+				<button
+					role="switch" aria-checked={roundedCorners}
+					onclick={() => (roundedCorners = !roundedCorners)}
+					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Rounded Corners</span>
-					<button
-						role="switch" aria-checked={roundedCorners}
-						onclick={() => (roundedCorners = !roundedCorners)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {roundedCorners ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 
 				<!-- Win Animation -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+				<button
+					role="switch" aria-checked={winAnimation}
+					onclick={() => (winAnimation = !winAnimation)}
+					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Win Animation</span>
-					<button
-						role="switch" aria-checked={winAnimation}
-						onclick={() => (winAnimation = !winAnimation)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 
 				<!-- Divider -->
 				<div class="my-1 border-t {darkMode ? 'border-slate-700/60' : 'border-slate-200'}"></div>
@@ -1006,7 +1018,7 @@
 
 			<!-- Hamburger button — always visible -->
 			<button
-				class="flex items-center justify-center w-9 h-9 rounded-lg transition-colors active:scale-95
+				class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors active:scale-95
 				       {darkMode
 				           ? 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
 				           : 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-800'}"
@@ -1101,7 +1113,12 @@
 				</div>
 
 				<!-- Toggle: Dark Mode -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+				<button
+					role="switch" aria-checked={darkMode}
+					onclick={() => (darkMode = !darkMode)}
+					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm flex items-center gap-1.5">
 						{#if darkMode}
 							<!-- Moon icon -->
@@ -1124,62 +1141,65 @@
 						{/if}
 						Dark Mode
 					</span>
-					<button
-						role="switch"
-						aria-checked={darkMode}
-						onclick={() => (darkMode = !darkMode)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {darkMode ? 'bg-emerald-500' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
 						             {darkMode ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 
 				<!-- Toggle: Show Grid -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+				<button
+					role="switch" aria-checked={showGrid}
+					onclick={() => (showGrid = !showGrid)}
+					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Show Grid</span>
-					<button
-						role="switch"
-						aria-checked={showGrid}
-						onclick={() => (showGrid = !showGrid)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {showGrid ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
 						             {showGrid ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 
 				<!-- Toggle: Rounded Corners -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+				<button
+					role="switch" aria-checked={roundedCorners}
+					onclick={() => (roundedCorners = !roundedCorners)}
+					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Rounded Corners</span>
-					<button
-						role="switch"
-						aria-checked={roundedCorners}
-						onclick={() => (roundedCorners = !roundedCorners)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {roundedCorners ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
 						             {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 
 				<!-- Toggle: Win Animation -->
-				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+				<button
+					role="switch" aria-checked={winAnimation}
+					onclick={() => (winAnimation = !winAnimation)}
+					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+				>
 					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Win Animation</span>
-					<button
-						role="switch"
-						aria-checked={winAnimation}
-						onclick={() => (winAnimation = !winAnimation)}
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					<span
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
 						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
 						             {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</button>
-				</label>
+					</span>
+				</button>
 			</div>
 		{/if}
 

@@ -838,7 +838,25 @@
 				           : 'bg-white border border-slate-200'}"
 				transition:fly={{ y: reducedMotion ? 0 : 8, duration: reducedMotion ? 120 : 180, opacity: 0 }}
 			>
-				<p id="menu-settings-title" class="text-sm font-semibold {darkMode ? 'text-slate-300' : 'text-slate-600'} mb-2 tracking-wide uppercase">Settings</p>
+				<!-- Header row: title + explicit close button. The gear that opened
+				     this dialog is inert while the dialog is open, so keyboard and
+				     SR users need a dismissal target inside the panel. -->
+				<div class="flex items-center justify-between mb-2">
+					<p id="menu-settings-title" class="text-sm font-semibold {darkMode ? 'text-slate-300' : 'text-slate-600'} tracking-wide uppercase">Settings</p>
+					<button
+						onclick={() => (menuSettingsOpen = false)}
+						aria-label="Close settings"
+						class="flex items-center justify-center w-11 h-11 -mr-2 rounded-lg transition-colors
+						       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {darkMode
+						           ? 'text-slate-400 hover:bg-slate-700 hover:text-white'
+						           : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}"
+					>
+						<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+							<line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
+						</svg>
+					</button>
+				</div>
 
 				<!-- Dark Mode -->
 				<button
@@ -1116,6 +1134,23 @@
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				transition:fly={{ y: reducedMotion ? 0 : -6, duration: reducedMotion ? 120 : 160, opacity: 0 }}
 			>
+				<!-- Close button — explicit dismissal target for keyboard and SR users.
+				     The hamburger that opened this is inert while the dialog is open. -->
+				<div class="flex justify-end">
+					<button
+						onclick={() => (menuOpen = false)}
+						aria-label="Close menu"
+						class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
+						       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {darkMode
+						           ? 'text-slate-400 hover:bg-slate-800 hover:text-white'
+						           : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}"
+					>
+						<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+							<line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
+						</svg>
+					</button>
+				</div>
 				<div class="flex gap-2">
 					<button
 						onclick={() => { goToMenu(); menuOpen = false; }}

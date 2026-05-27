@@ -158,6 +158,16 @@
 	let lostCounted       = false; // same pattern — reset on new game
 	let rafId: number | null = null;
 
+	// Settings — loaded eagerly so derived values that read them (e.g. vortexDone)
+	// can be declared anywhere in this script. Persistence effect lives further down.
+	const _settings    = loadSettings();
+	let showGrid       = $state(_settings.showGrid);
+	let roundedCorners = $state(_settings.roundedCorners);
+	let darkMode       = $state(_settings.darkMode);
+	let winAnimation   = $state(_settings.winAnimation);
+	let showLoading = $state(false);
+	let menuSettingsOpen = $state(false);
+
 	// SVG path refs for in-flight drain animations — keyed by arrow id.
 	// Used to call .getPointAtLength(...) for arrowhead positioning each frame.
 	let pathRefs = $state<Record<number, SVGPathElement | null>>({});
@@ -628,14 +638,6 @@
 
 	const totalWins = $derived(ENABLED_DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
 
-	const _settings    = loadSettings();
-	let showGrid       = $state(_settings.showGrid);
-	let roundedCorners = $state(_settings.roundedCorners);
-	let darkMode       = $state(_settings.darkMode);
-	let winAnimation   = $state(_settings.winAnimation);
-	let showLoading = $state(false);
-	let menuSettingsOpen = $state(false);
-
 	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode, winAnimation }); });
 
 	// ─── theme-aware arrow colors ────────────────────────────────────────────────
@@ -858,19 +860,20 @@
 					onclick={() => startGame(d.cells, d.square)}
 					class="group relative flex items-center py-4 px-5 rounded-2xl bg-gradient-to-br {d.color}
 					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
-					       ring-2 ring-transparent hover:{d.ring} focus-visible:{d.ring} focus-visible:outline-none"
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white
+					       focus-visible:ring-offset-2 {darkMode ? 'focus-visible:ring-offset-slate-900' : 'focus-visible:ring-offset-slate-100'}"
 					style={'bgStyle' in d ? d.bgStyle : ''}
 				>
 					<!-- Label + grid size -->
 					<div class="flex flex-col items-start flex-1 min-w-0">
 						<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
-						<span class="text-white/70 text-sm">{gridCaption(d.cells, d.square)}</span>
+						<span class="text-white/90 text-sm">{gridCaption(d.cells, d.square)}</span>
 					</div>
 					<!-- Completion count badge -->
 					<div class="flex flex-col items-center justify-center ml-3 shrink-0 min-w-[3rem]">
 						{#if count > 0}
 							<span class="text-2xl font-extrabold text-white leading-none">{count}</span>
-							<span class="text-white/60 text-[10px] uppercase tracking-widest mt-0.5">
+							<span class="text-white/85 text-[10px] uppercase tracking-widest mt-0.5">
 								{count === 1 ? 'win' : 'wins'}
 							</span>
 						{:else}
@@ -887,7 +890,7 @@
 		<div class="shrink-0 flex justify-center pb-1">
 			<button
 				onclick={goToStats}
-				class="{darkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} text-sm transition-colors flex items-center gap-1.5"
+				class="{darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'} text-sm transition-colors flex items-center gap-1.5"
 			>
 				<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
 					<rect x="1" y="7" width="3" height="6" rx="0.5"/>
@@ -937,7 +940,7 @@
 					<span class="text-xs uppercase tracking-widest {darkMode ? 'text-slate-400' : 'text-slate-500'}">Best</span>
 				</div>
 			</div>
-			<p class="text-xs {darkMode ? 'text-slate-500' : 'text-slate-400'} -mt-5 tracking-wide uppercase">Win Streak</p>
+			<p class="text-xs {darkMode ? 'text-slate-400' : 'text-slate-500'} -mt-5 tracking-wide uppercase">Win Streak</p>
 
 			<!-- Donut chart -->
 			<svg viewBox="0 0 200 200" width="220" height="220" style="overflow:visible">

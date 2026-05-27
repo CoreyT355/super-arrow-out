@@ -168,6 +168,20 @@
 	let showLoading = $state(false);
 	let menuSettingsOpen = $state(false);
 
+	// OS-level reduce-motion preference. Reactive — picks up live changes from
+	// System Settings without a reload. Gates the vortex, blocked-nudge, and
+	// fly transitions; drain animations keep running because they're core to
+	// gameplay feedback (short, linear, non-spinning).
+	let reducedMotion = $state(false);
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+		reducedMotion = mq.matches;
+		const handler = (e: MediaQueryListEvent) => (reducedMotion = e.matches);
+		mq.addEventListener('change', handler);
+		return () => mq.removeEventListener('change', handler);
+	});
+
 	// SVG path refs for in-flight drain animations — keyed by arrow id.
 	// Used to call .getPointAtLength(...) for arrowhead positioning each frame.
 	let pathRefs = $state<Record<number, SVGPathElement | null>>({});
@@ -183,9 +197,13 @@
 	let vortexAnim      = $state<{ startTime: number } | null>(null);
 	let vortexParticles = $state<Particle[]>([]);
 	const vortexP    = $derived(vortexAnim ? Math.min(1, (now - vortexAnim.startTime) / VORTEX_DURATION) : 0);
-	// If winAnimation is on, stay "not done" from the moment won=true (even before
-	// the $effect has had a chance to set vortexAnim), preventing a one-frame flash.
-	const vortexDone = $derived(!winAnimation || (vortexAnim !== null && vortexP >= 1));
+	// Whether the vortex should actually play. OS reduce-motion overrides the
+	// user's app setting — see the truth table in .claude/.plans/accessibility.md.
+	const shouldPlayVortex = $derived(winAnimation && !reducedMotion);
+	// If the vortex is going to play, stay "not done" from the moment won=true
+	// (even before the $effect has had a chance to set vortexAnim) — prevents a
+	// one-frame flash of the win panel before the spiral starts.
+	const vortexDone = $derived(!shouldPlayVortex || (vortexAnim !== null && vortexP >= 1));
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
 
@@ -500,6 +518,12 @@
 				phase: 'exiting', startTime: t,
 				routeD, L_total, L_snake, durationMs,
 			} };
+		} else if (reducedMotion) {
+			// Reduced motion: skip the nudge / bounce / flash sequence entirely.
+			// Apply the penalty (life lost, marked red) instantly. No animation at
+			// all — the user sees a heart disappear and the arrow tint to dark red.
+			lives = Math.max(0, lives - 1);
+			markedRed = new Set([...markedRed, id]);
 		} else {
 			anims = { ...anims, [id]: { phase: 'blocked-fwd', startTime: t, maxSteps: dist + 0.5 } };
 		}
@@ -691,7 +715,7 @@
 
 	// Trigger vortex collapse on win (if enabled); clear it when the game resets.
 	$effect(() => {
-		if (won && !vortexAnim && winAnimation) {
+		if (won && !vortexAnim && shouldPlayVortex) {
 			vortexAnim = { startTime: performance.now() };
 			// Spawn star particles spread across the board, spiraling inward
 			const cx = W / 2, cy = H / 2;
@@ -754,7 +778,7 @@
 				       {darkMode
 				           ? 'bg-slate-800 border border-slate-700/60'
 				           : 'bg-white border border-slate-200'}"
-				transition:fly={{ y: 8, duration: 180, opacity: 0 }}
+				transition:fly={{ y: reducedMotion ? 0 : 8, duration: reducedMotion ? 120 : 180, opacity: 0 }}
 			>
 				<p class="text-sm font-semibold {darkMode ? 'text-slate-300' : 'text-slate-600'} mb-2 tracking-wide uppercase">Settings</p>
 
@@ -1078,7 +1102,7 @@
 				           ? 'bg-slate-900/95 backdrop-blur-md border-slate-700/60'
 				           : 'bg-white/95 backdrop-blur-md border-slate-300/60'}"
 				style="top: calc(3rem + env(safe-area-inset-top))"
-				transition:fly={{ y: -6, duration: 160, opacity: 0 }}
+				transition:fly={{ y: reducedMotion ? 0 : -6, duration: reducedMotion ? 120 : 160, opacity: 0 }}
 			>
 				<div class="flex gap-2">
 					<button
@@ -1255,7 +1279,7 @@
 									                       : { x: headPt.x + DELTA[arrow.direction].dx, y: headPt.y + DELTA[arrow.direction].dy }}
 									{@const angle    = Math.atan2(aheadPt.y - headPt.y, aheadPt.x - headPt.x) * 180 / Math.PI}
 									{@const color    = themeColor(arrow.id)}
-									<g style="cursor:default;pointer-events:none">
+									<g style="cursor:default;pointer-events:none" opacity={0.95}>
 										<path
 											bind:this={pathRefs[arrow.id]}
 											d={anim.routeD}
@@ -1266,13 +1290,11 @@
 											stroke-linejoin="round"
 											stroke-dasharray="{anim.L_snake} {anim.L_total}"
 											stroke-dashoffset={offset}
-											opacity={0.9}
 										/>
 										<polygon
 											points="0.32,0 -0.16,-0.24 -0.16,0.24"
 											transform="translate({headPt.x},{headPt.y}) rotate({angle})"
 											fill={color}
-											opacity={0.95}
 										/>
 									</g>
 								{:else}
@@ -1284,7 +1306,7 @@
 									{@const head = pts[0]}
 									{@const red  = isFlashRed(anim, el)}
 									{@const color = themeColor(arrow.id)}
-									<g style="cursor:default;pointer-events:none">
+									<g style="cursor:default;pointer-events:none" opacity={0.95}>
 										<path
 											d={roundedPath(pts, roundedCorners ? 0.4 : 0)}
 											fill="none"
@@ -1292,13 +1314,11 @@
 											stroke-width={0.14}
 											stroke-linecap="round"
 											stroke-linejoin="round"
-											opacity={0.9}
 										/>
 										<polygon
 											points="0.32,0 -0.16,-0.24 -0.16,0.24"
 											transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
 											fill={red ? '#ef4444' : color}
-											opacity={0.95}
 										/>
 									</g>
 								{/if}
@@ -1307,7 +1327,7 @@
 								{@const sd        = staticArrowData[arrow.id]}
 								{@const penalized = markedRed.has(arrow.id)}
 								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
-								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer">
+								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer" opacity={0.95}>
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
 									{/each}
@@ -1318,13 +1338,11 @@
 										stroke-width={0.14}
 										stroke-linecap="round"
 										stroke-linejoin="round"
-										opacity={0.9}
 									/>
 									<polygon
 										points="0.32,0 -0.16,-0.24 -0.16,0.24"
 										transform="translate({sd.head.x + 0.5},{sd.head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
 										fill={drawColor}
-										opacity={0.95}
 									/>
 								</g>
 							{/if}
@@ -1385,7 +1403,7 @@
 				<!-- Win panel — appears after the vortex collapse finishes -->
 				{#if won && vortexDone}
 					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}"
-					     transition:fly={{ y: 16, duration: 280, opacity: 0 }}>
+					     transition:fly={{ y: reducedMotion ? 0 : 16, duration: reducedMotion ? 160 : 280, opacity: 0 }}>
 						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
 						            {darkMode
 						                ? 'bg-slate-900/90 border border-slate-700/60'

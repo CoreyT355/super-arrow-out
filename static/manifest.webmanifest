@@ -1,12 +1,12 @@
 {
-  "name": "Arrow Out",
-  "short_name": "Arrow Out",
-  "description": "A puzzle game — launch arrow snakes off the grid to clear the board.",
+  "name": "Super Arrow Out",
+  "short_name": "Super Arrow Out",
+  "description": "A puzzle game - launch arrow snakes off the grid to clear the board.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "/icon-192.png",

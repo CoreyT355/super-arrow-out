@@ -185,6 +185,8 @@
 	let scale = $state(1);
 	let panX  = $state(0);
 	let panY  = $state(0);
+	let containerW = $state(0);
+	let containerH = $state(0);
 
 	// Non-reactive gesture tracking (mutated freely, never drives rendering directly)
 	let _node: HTMLElement | null = null;
@@ -195,14 +197,22 @@
 
 	function clampPan(px: number, py: number, s: number) {
 		if (!_node) return { x: px, y: py };
-		const { width: w, height: h } = _node.getBoundingClientRect();
 		return {
-			x: s <= 1 ? 0 : Math.min(0, Math.max(w * (1 - s), px)),
-			y: s <= 1 ? 0 : Math.min(0, Math.max(h * (1 - s), py)),
+			x: s <= 1 ? 0 : Math.min(0, Math.max(containerW * (1 - s), px)),
+			y: s <= 1 ? 0 : Math.min(0, Math.max(containerH * (1 - s), py)),
 		};
 	}
 
 	function resetView() { scale = 1; panX = 0; panY = 0; }
+
+	const svgViewBox = $derived.by(() => {
+		if (!containerW || !containerH) return `-0.1 -0.1 ${W + 0.2} ${H + 0.2}`;
+		const vbW = (W + 0.2) / scale;
+		const vbH = (H + 0.2) / scale;
+		const vbX = -panX * vbW / containerW - 0.1;
+		const vbY = -panY * vbH / containerH - 0.1;
+		return `${vbX} ${vbY} ${vbW} ${vbH}`;
+	});
 
 	function onTouchStart(e: TouchEvent) {
 		for (const t of Array.from(e.changedTouches))
@@ -266,6 +276,13 @@
 	function panZoomAction(node: HTMLElement) {
 		_node = node;
 
+		const ro = new ResizeObserver(entries => {
+			const { width, height } = entries[0].contentRect;
+			containerW = width;
+			containerH = height;
+		});
+		ro.observe(node);
+
 		function onWheel(e: WheelEvent) {
 			e.preventDefault();
 			const rect = node.getBoundingClientRect();
@@ -285,6 +302,7 @@
 
 		return {
 			destroy() {
+				ro.disconnect();
 				node.removeEventListener('touchstart',  onTouchStart);
 				node.removeEventListener('touchmove',   onTouchMove);
 				node.removeEventListener('touchend',    onTouchEnd);
@@ -1176,8 +1194,9 @@
 				use:panZoomAction
 			>
 				<svg
-					viewBox="-0.1 -0.1 {W + 0.2} {H + 0.2}"
-					style="width:100%;height:100%;transform:translate({panX}px,{panY}px) scale({scale});transform-origin:0 0;"
+					viewBox={svgViewBox}
+					preserveAspectRatio="none"
+					style="width:100%;height:100%;"
 					overflow="hidden"
 				>
 					<!-- Grid background: single SVG pattern — no per-cell rects needed.

@@ -41,9 +41,12 @@ Grid dimensions adapt to your screen's aspect ratio on non-square modes.
 - **3-life system** — blocked arrows bounce back with a red flash and cost a heart
 - **Try Again** — replays the exact same generated layout (saved to `localStorage`)
 - **Progress tracking** — wins per difficulty are persisted locally and shown on the menu
-- **Stats screen** — donut chart breaking down your win history by difficulty
+- **Stats screen** — donut chart breaking down your win history by difficulty, plus current and best win streak
+- **Win streak** — consecutive wins without a loss are tracked across sessions; resets on any failed puzzle
+- **Win animation** — sparkle particles spiral into a vortex when you clear the board (can be disabled in settings)
 - **Pinch-to-zoom** — full pan and zoom on larger grids, mobile-optimised
 - **Smooth animations** — rounded snake paths, eased nudge/bounce, per-frame RAF loop
+- **Settings** — dark mode, grid lines, rounded corners, and win animation toggle; accessible from both the menu and mid-game
 
 ---
 

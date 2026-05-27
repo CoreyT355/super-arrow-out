@@ -169,11 +169,13 @@
 		'C -0.08 0.08 -0.08 0.08 -1 0 C -0.08 -0.08 -0.08 -0.08 0 -1 Z';
 
 	// Vortex collapse: plays when the player wins, before the win panel appears.
-	interface Particle { r0: number; θ0: number; color: string; size: number; delay: number; rotation: number }
+	interface Particle { r0: number; θ0: number; color: string; size: number; delay: number; rotation: number; speed: number }
 	let vortexAnim      = $state<{ startTime: number } | null>(null);
 	let vortexParticles = $state<Particle[]>([]);
 	const vortexP    = $derived(vortexAnim ? Math.min(1, (now - vortexAnim.startTime) / VORTEX_DURATION) : 0);
-	const vortexDone = $derived(!vortexAnim || vortexP >= 1);
+	// If winAnimation is on, stay "not done" from the moment won=true (even before
+	// the $effect has had a chance to set vortexAnim), preventing a one-frame flash.
+	const vortexDone = $derived(!winAnimation || (vortexAnim !== null && vortexP >= 1));
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
 
@@ -684,8 +686,9 @@
 					θ0: Math.atan2(dy, dx),
 					color: palette[i % palette.length],
 					size: 0.07 + Math.random() * 0.09,
-					delay: Math.random() * 120,
+					delay: Math.random() * 300,
 					rotation: Math.random() * 360,
+					speed: 0.35 + Math.random() * 0.65,  // fraction of VORTEX_SPIN_MS each particle uses
 				};
 			});
 			if (rafId === null) rafId = requestAnimationFrame(loop);
@@ -1305,9 +1308,9 @@
 						{@const lElapsed    = Math.max(0, elapsed - pt.delay)}
 						<!-- Phase 1: fade in linearly over VORTEX_FADE_MS -->
 						{@const fadeP       = Math.min(1, lElapsed / VORTEX_FADE_MS)}
-						<!-- Phase 2: cubic ease-in spiral — starts slow, rockets in -->
+						<!-- Phase 2: cubic ease-in spiral — each particle has its own speed -->
 						{@const lSpinElapsed = Math.max(0, lElapsed - VORTEX_FADE_MS)}
-						{@const lSpinP      = Math.min(1, lSpinElapsed / VORTEX_SPIN_MS)}
+						{@const lSpinP      = Math.min(1, lSpinElapsed / (VORTEX_SPIN_MS * pt.speed))}
 						{@const lSpinEP     = lSpinP * lSpinP * lSpinP}
 						{@const r           = pt.r0 * (1 - lSpinEP)}
 						{@const θ           = pt.θ0 + lSpinEP * Math.PI * 4}

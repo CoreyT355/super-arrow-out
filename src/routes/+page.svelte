@@ -663,6 +663,17 @@
 
 	const totalWins = $derived(ENABLED_DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
 
+	// One-line summary of the donut chart for screen-reader users. The visible
+	// legend below the chart already lists per-difficulty counts; this is the
+	// at-a-glance equivalent that an SR user gets without scanning all rows.
+	const donutLabel = $derived.by(() => {
+		if (totalWins === 0) return 'Win breakdown: no wins yet';
+		const parts = ENABLED_DIFFICULTIES
+			.map(d => `${d.label} ${progress[d.label] ?? 0}`)
+			.join(', ');
+		return `Win breakdown: ${totalWins} total. ${parts}`;
+	});
+
 	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode, winAnimation }); });
 
 	// ─── theme-aware arrow colors ────────────────────────────────────────────────
@@ -1003,7 +1014,14 @@
 			<p class="text-xs {darkMode ? 'text-slate-400' : 'text-slate-500'} -mt-5 tracking-wide uppercase">Win Streak</p>
 
 			<!-- Donut chart -->
-			<svg viewBox="0 0 200 200" width="220" height="220" style="overflow:visible">
+			<svg
+				viewBox="0 0 200 200"
+				width="220"
+				height="220"
+				style="overflow:visible"
+				role="img"
+				aria-label={donutLabel}
+			>
 				<!-- Background ring -->
 				<circle cx="100" cy="100" r={DONUT_R} fill="none"
 					stroke={darkMode ? 'rgba(51,65,85,0.5)' : 'rgba(203,213,225,0.8)'}
@@ -1095,13 +1113,23 @@
 <!-- Hearts — always visible on every screen size -->
 <div class="flex items-center gap-4 pr-1">
 	{#if !showLoading}
-		<span class="text-sm font-medium {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+		<span
+			class="text-sm font-medium {darkMode ? 'text-slate-400' : 'text-slate-500'}"
+			aria-live="polite"
+			aria-atomic="true"
+		>
 			{level.arrows.length - removed.size} arrows left
 		</span>
 	{/if}
-	<div class="flex items-center gap-1.5">
+	<div
+		class="flex items-center gap-1.5"
+		role="img"
+		aria-label="{lives} of {MAX_LIVES} lives remaining"
+		aria-live="polite"
+	>
 		{#each Array(MAX_LIVES) as _, i}
 			<span
+				aria-hidden="true"
 				class="text-xl leading-none select-none transition-all duration-300
 				       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : darkMode ? 'text-slate-700' : 'text-slate-300'}"
 			>♥</span>
@@ -1440,10 +1468,14 @@
 
 				<!-- Loading screen -->
 				{#if showLoading}
-					<div class="absolute inset-0 z-50 flex items-center justify-center {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/80'} backdrop-blur-sm">
+					<div
+						class="absolute inset-0 z-50 flex items-center justify-center {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/80'} backdrop-blur-sm"
+						role="status"
+						aria-live="polite"
+					>
 						<div class="flex flex-col items-center gap-4 text-center">
-							<div class="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
-							<p class="text-xl font-bold {darkMode ? 'text-white' : 'text-slate-900'}">Loading...</p>
+							<div class="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" aria-hidden="true"></div>
+							<p class="text-xl font-bold {darkMode ? 'text-white' : 'text-slate-900'}">Loading…</p>
 						</div>
 					</div>
 				{/if}
@@ -1470,9 +1502,9 @@
 					<div class="text-4xl mb-2" aria-hidden="true">🎉</div>
 					<p id="win-panel-title" class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
 					<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">All {level.arrows.length} arrows cleared</p>
-					<div class="flex gap-1 mt-1">
+					<div class="flex gap-1 mt-1" role="img" aria-label="{lives} of {MAX_LIVES} lives remaining">
 						{#each Array(MAX_LIVES) as _, i}
-							<span class="text-lg transition-all {i < lives ? 'text-red-500' : darkMode ? 'text-slate-700' : 'text-slate-300'}">
+							<span aria-hidden="true" class="text-lg transition-all {i < lives ? 'text-red-500' : darkMode ? 'text-slate-700' : 'text-slate-300'}">
 								{i < lives ? '♥' : '♡'}
 							</span>
 						{/each}

@@ -20,3 +20,9 @@ html, body {
     40%, 80% { transform: translateX(4px); }
   }
 }
+
+/* When the user has OS-level reduce-motion enabled, neutralise the shake
+   utility. (Currently unused, but kept reduced-motion-safe for the future.) */
+@media (prefers-reduced-motion: reduce) {
+  .animate-shake { animation: none !important; }
+}

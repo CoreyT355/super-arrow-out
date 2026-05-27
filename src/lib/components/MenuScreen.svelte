@@ -1,18 +1,86 @@
 <script lang="ts">
-	import { fly } from 'svelte/transition';
+	import { fly, scale } from 'svelte/transition';
 	import { settings } from '$lib/stores/settings.svelte';
 	import { progress } from '$lib/stores/progress.svelte';
 	import { goToGame, goToStats } from '$lib/stores/session.svelte';
 	import { ENABLED_DIFFICULTIES, gridCaption } from '$lib/config/difficulties';
 
 	let menuSettingsOpen = $state(false);
+
+	// ── Easter egg: swipe ↑ ↑ ↓ ↓ ← → ← → within 45 seconds ─────────────────
+	const KONAMI      = ['up','up','down','down','left','right','left','right'] as const;
+	const TIMEOUT_MS  = 45_000;
+	const SWIPE_MIN   = 30; // px — minimum travel to count as a swipe
+
+	let swipeIdx        = $state(0);
+	let sequenceStart   = 0;
+	let easterEggActive = $state(false);
+	let _tx0 = 0, _ty0 = 0;
+
+	function handleSwipe(dir: string) {
+		const now = Date.now();
+		// Timeout: reset progress if the window has expired
+		if (swipeIdx > 0 && now - sequenceStart > TIMEOUT_MS) swipeIdx = 0;
+
+		if (dir === KONAMI[swipeIdx]) {
+			if (swipeIdx === 0) sequenceStart = now; // start the clock on first correct swipe
+			swipeIdx++;
+			if (swipeIdx === KONAMI.length) { easterEggActive = true; swipeIdx = 0; }
+		} else {
+			// Wrong direction — restart from 1 if this matches the first gesture, else 0
+			swipeIdx = dir === KONAMI[0] ? 1 : 0;
+			if (swipeIdx === 1) sequenceStart = now;
+		}
+	}
+
+	function onTouchStart(e: TouchEvent) {
+		const t = e.changedTouches[0];
+		_tx0 = t.clientX; _ty0 = t.clientY;
+	}
+
+	function onTouchEnd(e: TouchEvent) {
+		const t = e.changedTouches[0];
+		const dx = t.clientX - _tx0, dy = t.clientY - _ty0;
+		if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_MIN) return; // tap, not swipe
+		handleSwipe(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'));
+	}
+
+	function onKeyDown(e: KeyboardEvent) {
+		const map: Record<string, string> = { ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right' };
+		if (map[e.key]) { e.preventDefault(); handleSwipe(map[e.key]); }
+	}
 </script>
 
-<main class="relative w-full h-dvh {settings.darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
-      style="padding-top: max(1.5rem, env(safe-area-inset-top))">
+<svelte:window onkeydown={onKeyDown} />
 
-	<!-- Top row: gear button right-aligned -->
-	<div class="flex justify-end shrink-0">
+<main class="relative w-full h-dvh {settings.darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+      style="padding-top: max(1.5rem, env(safe-area-inset-top))"
+      ontouchstart={onTouchStart}
+      ontouchend={onTouchEnd}>
+
+	<!-- Top row: easter egg slot (left) + gear button (right) -->
+	<div class="flex justify-between items-center shrink-0">
+
+		<!-- Easter egg icon — appears after the gesture sequence is completed -->
+		<div class="w-9 h-9 flex items-center justify-center">
+			{#if easterEggActive}
+				<button
+					class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors
+					       {settings.darkMode
+					           ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+					           : 'bg-amber-100 text-amber-500 hover:bg-amber-200'}"
+					aria-label="???"
+					transition:scale={{ duration: 250, start: 0.4 }}
+					onclick={() => { /* TODO: wire up easter egg behavior */ }}
+				>
+					<!-- 5-pointed star -->
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+						<polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"/>
+					</svg>
+				</button>
+			{/if}
+		</div>
+
 		<button
 			onclick={() => (menuSettingsOpen = true)}
 			class="flex items-center justify-center w-9 h-9 rounded-lg transition-colors

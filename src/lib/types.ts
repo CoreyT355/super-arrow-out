@@ -17,3 +17,17 @@ export interface Level {
   height: number;
   arrows: Arrow[];
 }
+
+export type Phase = 'exiting' | 'blocked-fwd' | 'blocked-back' | 'blocked-flash';
+
+export interface Anim {
+  phase: Phase;
+  startTime: number;
+  totalSteps?: number;
+  maxSteps?: number;
+  // drain animation (set when phase === 'exiting')
+  routeD?: string;     // SVG path string for the full route (tail → head → extension)
+  L_total?: number;    // total length of routeD in SVG units (cells)
+  L_snake?: number;    // length of just the snake portion = the visible "dash"
+  durationMs?: number; // total exit animation duration
+}

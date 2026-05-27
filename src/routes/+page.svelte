@@ -41,6 +41,7 @@
 	const STORAGE_KEY   = 'arrow-out-progress';
 	const PUZZLE_KEY    = 'arrow-out-puzzle';
 	const SETTINGS_KEY  = 'arrow-out-settings';
+	const STREAK_KEY    = 'arrow-out-streak';
 
 	// Returns {} on server (SSR) or on parse error.
 	function loadProgress(): Record<string, number> {
@@ -68,8 +69,8 @@
 		} catch { return null; }
 	}
 
-	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean } {
-		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true, darkMode: true };
+	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean } {
+		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true, darkMode: true, winAnimation: true };
 		try {
 			const raw = localStorage.getItem(SETTINGS_KEY);
 			const parsed = raw ? JSON.parse(raw) : {};
@@ -77,17 +78,33 @@
 				showGrid:       parsed.showGrid       ?? true,
 				roundedCorners: parsed.roundedCorners ?? true,
 				darkMode:       parsed.darkMode       ?? true,
+				winAnimation:   parsed.winAnimation   ?? true,
 			};
-		} catch { return { showGrid: true, roundedCorners: true, darkMode: true }; }
+		} catch { return { showGrid: true, roundedCorners: true, darkMode: true, winAnimation: true }; }
 	}
 
-	function saveSettings(s: { showGrid: boolean; roundedCorners: boolean; darkMode: boolean }) {
+	function saveSettings(s: { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean }) {
 		if (typeof window === 'undefined') return;
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 	}
 
+	function loadStreak(): { current: number; best: number } {
+		if (typeof window === 'undefined') return { current: 0, best: 0 };
+		try {
+			const raw = localStorage.getItem(STREAK_KEY);
+			const parsed = raw ? JSON.parse(raw) : {};
+			return { current: parsed.current ?? 0, best: parsed.best ?? 0 };
+		} catch { return { current: 0, best: 0 }; }
+	}
+
+	function saveStreak(s: { current: number; best: number }) {
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(STREAK_KEY, JSON.stringify(s));
+	}
+
 	// Initialise from storage immediately on the client (guard keeps SSR safe).
 	let progress = $state<Record<string, number>>(loadProgress());
+	let streak   = $state(loadStreak());
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
@@ -101,8 +118,11 @@
 	const NUDGE_FWD     = 140; // ms to nudge toward blocker
 	const NUDGE_BACK    = 140; // ms to spring back
 	const FLASH_HALF    = 90;  // ms per flash half (×4 = total flash duration)
-	const EXIT_DURATION = 450; // ms — constant drain duration regardless of snake length
-	const EXIT_MIN_DUR  = 220; // ms — floor so a 1-cell snake at the edge isn't instant
+	const EXIT_DURATION  = 450; // ms — constant drain duration regardless of snake length
+	const EXIT_MIN_DUR   = 220; // ms — floor so a 1-cell snake at the edge isn't instant
+	const VORTEX_DURATION = 2000; // ms — win collapse animation (fade-in + spiral)
+	const VORTEX_FADE_MS  =  600; // ms — stars fade in from nothing during this phase
+	const VORTEX_SPIN_MS  = VORTEX_DURATION - VORTEX_FADE_MS; // 1400ms — spiral with ease-in
 
 	const DIR_ROT: Record<Direction, number> = { E: 0, S: 90, W: 180, N: 270 };
 
@@ -135,11 +155,27 @@
 	let lives             = $state(MAX_LIVES);
 	let currentDifficulty = $state<string | null>(null); // label of the active difficulty
 	let winCounted        = false; // plain bool — not reactive; reset on new game
+	let lostCounted       = false; // same pattern — reset on new game
 	let rafId: number | null = null;
 
 	// SVG path refs for in-flight drain animations — keyed by arrow id.
 	// Used to call .getPointAtLength(...) for arrowhead positioning each frame.
 	let pathRefs = $state<Record<number, SVGPathElement | null>>({});
+
+	// 4-pointed sparkle star — cubic beziers pinch through (±0.08,±0.08) between each tip.
+	// Normalized to radius 1; scaled per-particle via SVG transform.
+	const SPARKLE_PATH =
+		'M 0 -1 C 0.08 -0.08 0.08 -0.08 1 0 C 0.08 0.08 0.08 0.08 0 1 ' +
+		'C -0.08 0.08 -0.08 0.08 -1 0 C -0.08 -0.08 -0.08 -0.08 0 -1 Z';
+
+	// Vortex collapse: plays when the player wins, before the win panel appears.
+	interface Particle { r0: number; θ0: number; color: string; size: number; delay: number; rotation: number; speed: number }
+	let vortexAnim      = $state<{ startTime: number } | null>(null);
+	let vortexParticles = $state<Particle[]>([]);
+	const vortexP    = $derived(vortexAnim ? Math.min(1, (now - vortexAnim.startTime) / VORTEX_DURATION) : 0);
+	// If winAnimation is on, stay "not done" from the moment won=true (even before
+	// the $effect has had a chance to set vortexAnim), preventing a one-frame flash.
+	const vortexDone = $derived(!winAnimation || (vortexAnim !== null && vortexP >= 1));
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
 
@@ -478,7 +514,8 @@
 
 		if (dirty) { anims = next; removed = nextRem; }
 
-		if (Object.keys(next).length > 0) rafId = requestAnimationFrame(loop);
+		const vortexRunning = vortexAnim !== null && (t - vortexAnim.startTime) < VORTEX_DURATION;
+		if (Object.keys(next).length > 0 || vortexRunning) rafId = requestAnimationFrame(loop);
 		else rafId = null;
 	}
 
@@ -509,6 +546,7 @@
 		lives             = MAX_LIVES;
 		menuOpen          = false;
 		winCounted        = false;
+		lostCounted       = false;
 		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
 		level             = await generateInWorker(w, h);
 		savePuzzle(level);
@@ -523,8 +561,9 @@
 		removed    = new Set();
 		markedRed  = new Set();
 		anims      = {};
-		lives      = MAX_LIVES;
-		winCounted = false;
+		lives       = MAX_LIVES;
+		winCounted  = false;
+		lostCounted = false;
 		if (reuse) {
 			level = loadPuzzle() ?? generateLevel(W, H);
 		} else {
@@ -575,10 +614,11 @@
 	let showGrid       = $state(_settings.showGrid);
 	let roundedCorners = $state(_settings.roundedCorners);
 	let darkMode       = $state(_settings.darkMode);
+	let winAnimation   = $state(_settings.winAnimation);
 	let showLoading = $state(false);
 	let menuSettingsOpen = $state(false);
 
-	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode }); });
+	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode, winAnimation }); });
 
 	// ─── theme-aware arrow colors ────────────────────────────────────────────────
 
@@ -612,7 +652,48 @@
 			const next = { ...progress, [currentDifficulty]: (progress[currentDifficulty] ?? 0) + 1 };
 			progress = next;
 			saveProgress(next);
+			// Advance win streak
+			const nextStreak = { current: streak.current + 1, best: Math.max(streak.best, streak.current + 1) };
+			streak = nextStreak;
+			saveStreak(nextStreak);
 		}
+	});
+
+	// Reset streak when the player loses.
+	$effect(() => {
+		if (lost && !lostCounted) {
+			lostCounted = true;
+			const nextStreak = { current: 0, best: streak.best };
+			streak = nextStreak;
+			saveStreak(nextStreak);
+		}
+	});
+
+	// Trigger vortex collapse on win (if enabled); clear it when the game resets.
+	$effect(() => {
+		if (won && !vortexAnim && winAnimation) {
+			vortexAnim = { startTime: performance.now() };
+			// Spawn star particles spread across the board, spiraling inward
+			const cx = W / 2, cy = H / 2;
+			const count = Math.min(80, Math.max(24, level.arrows.length * 3));
+			const palette = COLORS_DARK; // bright pastels pop on both light and dark backgrounds
+			vortexParticles = Array.from({ length: count }, (_, i) => {
+				const px = Math.random() * W;
+				const py = Math.random() * H;
+				const dx = px - cx, dy = py - cy;
+				return {
+					r0: Math.hypot(dx, dy),
+					θ0: Math.atan2(dy, dx),
+					color: palette[i % palette.length],
+					size: 0.07 + Math.random() * 0.09,
+					delay: Math.random() * 300,
+					rotation: Math.random() * 360,
+					speed: 0.35 + Math.random() * 0.65,  // fraction of VORTEX_SPIN_MS each particle uses
+				};
+			});
+			if (rafId === null) rafId = requestAnimationFrame(loop);
+		}
+		if (!won) { vortexAnim = null; vortexParticles = []; }
 	});
 </script>
 
@@ -710,6 +791,41 @@
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
 					</button>
 				</label>
+
+				<!-- Win Animation -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Win Animation</span>
+					<button
+						role="switch" aria-checked={winAnimation}
+						onclick={() => (winAnimation = !winAnimation)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
+
+				<!-- Divider -->
+				<div class="my-1 border-t {darkMode ? 'border-slate-700/60' : 'border-slate-200'}"></div>
+
+				<!-- Stats link -->
+				<button
+					onclick={() => { menuSettingsOpen = false; goToStats(); }}
+					class="flex items-center justify-between w-full px-1 py-2 rounded-lg transition-colors
+					       {darkMode ? 'text-slate-200 hover:text-white' : 'text-slate-700 hover:text-slate-900'}"
+				>
+					<span class="flex items-center gap-2 text-sm">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+							<rect x="1" y="7" width="3" height="6" rx="0.5"/>
+							<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
+							<rect x="10" y="1" width="3" height="12" rx="0.5"/>
+						</svg>
+						Stats
+					</span>
+					<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="opacity-40">
+						<polyline points="5,3 9,7 5,11"/>
+					</svg>
+				</button>
 			</div>
 		{/if}
 		<div class="text-center">
@@ -747,19 +863,22 @@
 			{/each}
 		</div>
 
-		<button
-			onclick={goToStats}
-			class="{darkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} text-sm transition-colors mt-2 flex items-center gap-1.5"
-		>
-			<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-				<rect x="1" y="7" width="3" height="6" rx="0.5"/>
-				<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
-				<rect x="10" y="1" width="3" height="12" rx="0.5"/>
-			</svg>
-			Stats
-		</button>
-
 		</div><!-- end centered content -->
+
+		<!-- Stats button pinned to the bottom -->
+		<div class="shrink-0 flex justify-center pb-1">
+			<button
+				onclick={goToStats}
+				class="{darkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} text-sm transition-colors flex items-center gap-1.5"
+			>
+				<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="1" y="7" width="3" height="6" rx="0.5"/>
+					<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
+					<rect x="10" y="1" width="3" height="12" rx="0.5"/>
+				</svg>
+				Stats
+			</button>
+		</div>
 	</main>
 
 {:else if gameState === 'stats'}
@@ -782,6 +901,25 @@
 
 		<!-- Scrollable content -->
 		<div class="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-8 px-6 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+
+			<!-- Win Streak -->
+			<div class="w-full max-w-xs flex gap-3">
+				<div class="flex-1 flex flex-col items-center gap-1 py-4 rounded-2xl
+				            {darkMode ? 'bg-slate-800 border border-slate-700/60' : 'bg-white border border-slate-200'}">
+					<span class="text-3xl font-extrabold {streak.current > 0 ? 'text-emerald-400' : darkMode ? 'text-slate-500' : 'text-slate-400'}">
+						{streak.current}
+					</span>
+					<span class="text-xs uppercase tracking-widest {darkMode ? 'text-slate-400' : 'text-slate-500'}">Current</span>
+				</div>
+				<div class="flex-1 flex flex-col items-center gap-1 py-4 rounded-2xl
+				            {darkMode ? 'bg-slate-800 border border-slate-700/60' : 'bg-white border border-slate-200'}">
+					<span class="text-3xl font-extrabold {streak.best > 0 ? (darkMode ? 'text-amber-400' : 'text-amber-500') : darkMode ? 'text-slate-500' : 'text-slate-400'}">
+						{streak.best}
+					</span>
+					<span class="text-xs uppercase tracking-widest {darkMode ? 'text-slate-400' : 'text-slate-500'}">Best</span>
+				</div>
+			</div>
+			<p class="text-xs {darkMode ? 'text-slate-500' : 'text-slate-400'} -mt-5 tracking-wide uppercase">Win Streak</p>
 
 			<!-- Donut chart -->
 			<svg viewBox="0 0 200 200" width="220" height="220" style="overflow:visible">
@@ -1006,6 +1144,21 @@
 						             {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
 					</button>
 				</label>
+
+				<!-- Toggle: Win Animation -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Win Animation</span>
+					<button
+						role="switch"
+						aria-checked={winAnimation}
+						onclick={() => (winAnimation = !winAnimation)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
+						             {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
 			</div>
 		{/if}
 
@@ -1136,6 +1289,45 @@
 						{/if}
 					{/each}
 
+				<!-- Vortex collapse — star particles spiral into the board centre on win -->
+				<!-- Phase 1 (0–600ms): stars fade in from nothing, static              -->
+				<!-- Phase 2 (600–2000ms): cubic ease-in spiral accelerating to centre  -->
+				{#if vortexAnim}
+					{@const elapsed = Math.max(0, now - vortexAnim.startTime)}
+					{@const bx = W / 2}
+					{@const by = H / 2}
+					<!-- Global spiral progress (0→1 over phase 2) drives the bg overlay -->
+					{@const spinElapsed = Math.max(0, elapsed - VORTEX_FADE_MS)}
+					{@const spinP  = Math.min(1, spinElapsed / VORTEX_SPIN_MS)}
+					{@const spinEP = spinP * spinP * spinP}
+					<!-- Fade the board colour over the grid lines as the spiral completes -->
+					<rect x="0" y="0" width={W} height={H}
+						fill={darkMode ? '#0f172a' : '#f1f5f9'}
+						opacity={spinEP} />
+					{#each vortexParticles as pt}
+						{@const lElapsed    = Math.max(0, elapsed - pt.delay)}
+						<!-- Phase 1: fade in linearly over VORTEX_FADE_MS -->
+						{@const fadeP       = Math.min(1, lElapsed / VORTEX_FADE_MS)}
+						<!-- Phase 2: cubic ease-in spiral — each particle has its own speed -->
+						{@const lSpinElapsed = Math.max(0, lElapsed - VORTEX_FADE_MS)}
+						{@const lSpinP      = Math.min(1, lSpinElapsed / (VORTEX_SPIN_MS * pt.speed))}
+						{@const lSpinEP     = lSpinP * lSpinP * lSpinP}
+						{@const r           = pt.r0 * (1 - lSpinEP)}
+						{@const θ           = pt.θ0 + lSpinEP * Math.PI * 4}
+						{@const pcx         = bx + r * Math.cos(θ)}
+						{@const pcy         = by + r * Math.sin(θ)}
+						<!-- Slow drift during fade-in, then spin with the vortex -->
+						{@const rot         = pt.rotation + fadeP * 20 + lSpinEP * 180}
+						<g
+							transform="translate({pcx},{pcy}) rotate({rot}) scale({pt.size})"
+							fill={pt.color}
+							opacity={fadeP * (1 - lSpinP * lSpinP)}
+						>
+							<path d={SPARKLE_PATH} />
+						</g>
+					{/each}
+				{/if}
+
 				</svg>
 
 				<!-- Loading screen -->
@@ -1148,9 +1340,10 @@
 					</div>
 				{/if}
 
-				<!-- Win panel — centered HTML overlay, unaffected by zoom/pan -->
-				{#if won}
-					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}">
+				<!-- Win panel — appears after the vortex collapse finishes -->
+				{#if won && vortexDone}
+					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}"
+					     transition:fly={{ y: 16, duration: 280, opacity: 0 }}>
 						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
 						            {darkMode
 						                ? 'bg-slate-900/90 border border-slate-700/60'

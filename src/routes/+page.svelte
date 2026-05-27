@@ -639,12 +639,12 @@
 		winCounted   = false;
 		lostCounted  = false;
 		regenerating = true;
-		menuOpen     = false;
 		await tick();
 		level = await generateInWorker(W, H);
 		savePuzzle(level);
 		resetView();
 		regenerating = false;
+		menuOpen     = false;
 	}
 
 	function goToMenu() {

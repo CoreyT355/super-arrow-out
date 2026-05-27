@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { generateLevel } from '$lib/utils/puzzleGenerator';
+	import { trapFocus } from '$lib/utils/trapFocus';
 	import type { Direction, GridPos, Arrow, Level } from '$lib/types';
 	import { fly } from 'svelte/transition';
 	import { tick } from 'svelte';
@@ -747,7 +748,7 @@
 	      style="padding-top: max(1.5rem, env(safe-area-inset-top))">
 
 		<!-- Top row: gear button right-aligned -->
-		<div class="flex justify-end shrink-0">
+		<div class="flex justify-end shrink-0" inert={menuSettingsOpen}>
 			<button
 				onclick={() => (menuSettingsOpen = true)}
 				class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
@@ -764,23 +765,80 @@
 		</div>
 
 		<!-- Centered content -->
-		<div class="flex-1 flex flex-col items-center justify-center gap-6">
+		<div class="flex-1 flex flex-col items-center justify-center gap-6" inert={menuSettingsOpen}>
+			<div class="text-center">
+			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
+			<!-- <p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p> -->
+		</div>
 
-		<!-- Settings overlay -->
+		<div class="flex flex-col gap-4 w-full max-w-xs">
+			{#each ENABLED_DIFFICULTIES as d}
+				{@const count = progress[d.label] ?? 0}
+				<button
+					onclick={() => startGame(d.cells, d.square)}
+					class="group relative flex items-center py-4 px-5 rounded-2xl bg-gradient-to-br {d.color}
+					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white
+					       focus-visible:ring-offset-2 {darkMode ? 'focus-visible:ring-offset-slate-900' : 'focus-visible:ring-offset-slate-100'}"
+					style={'bgStyle' in d ? d.bgStyle : ''}
+				>
+					<!-- Label + grid size -->
+					<div class="flex flex-col items-start flex-1 min-w-0">
+						<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
+						<span class="text-white/90 text-sm">{gridCaption(d.cells, d.square)}</span>
+					</div>
+					<!-- Completion count badge -->
+					<div class="flex flex-col items-center justify-center ml-3 shrink-0 min-w-[3rem]">
+						{#if count > 0}
+							<span class="text-2xl font-extrabold text-white leading-none">{count}</span>
+							<span class="text-white/85 text-[10px] uppercase tracking-widest mt-0.5">
+								{count === 1 ? 'win' : 'wins'}
+							</span>
+						{:else}
+							<span class="text-white/30 text-xs">—</span>
+						{/if}
+					</div>
+				</button>
+			{/each}
+		</div>
+
+		</div><!-- end centered content -->
+
+		<!-- Stats button pinned to the bottom -->
+		<div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen}>
+			<button
+				onclick={goToStats}
+				class="{darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'} text-sm transition-colors flex items-center gap-1.5"
+			>
+				<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="1" y="7" width="3" height="6" rx="0.5"/>
+					<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
+					<rect x="10" y="1" width="3" height="12" rx="0.5"/>
+				</svg>
+				Stats
+			</button>
+		</div>
+
+		<!-- Settings overlay (outside the inert page chrome) -->
 		{#if menuSettingsOpen}
 			<button
 				class="absolute inset-0 z-40 {darkMode ? 'bg-slate-950/50' : 'bg-slate-400/40'}"
 				onclick={() => (menuSettingsOpen = false)}
-				aria-label="Close settings"
+				tabindex="-1"
+				aria-hidden="true"
 			></button>
 			<div
-				class="absolute z-50 w-72 flex flex-col gap-1 p-5 rounded-2xl shadow-2xl
+				use:trapFocus={{ onClose: () => (menuSettingsOpen = false) }}
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="menu-settings-title"
+				class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-72 flex flex-col gap-1 p-5 rounded-2xl shadow-2xl
 				       {darkMode
 				           ? 'bg-slate-800 border border-slate-700/60'
 				           : 'bg-white border border-slate-200'}"
 				transition:fly={{ y: reducedMotion ? 0 : 8, duration: reducedMotion ? 120 : 180, opacity: 0 }}
 			>
-				<p class="text-sm font-semibold {darkMode ? 'text-slate-300' : 'text-slate-600'} mb-2 tracking-wide uppercase">Settings</p>
+				<p id="menu-settings-title" class="text-sm font-semibold {darkMode ? 'text-slate-300' : 'text-slate-600'} mb-2 tracking-wide uppercase">Settings</p>
 
 				<!-- Dark Mode -->
 				<button
@@ -884,58 +942,6 @@
 				</button>
 			</div>
 		{/if}
-		<div class="text-center">
-			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
-			<!-- <p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p> -->
-		</div>
-
-		<div class="flex flex-col gap-4 w-full max-w-xs">
-			{#each ENABLED_DIFFICULTIES as d}
-				{@const count = progress[d.label] ?? 0}
-				<button
-					onclick={() => startGame(d.cells, d.square)}
-					class="group relative flex items-center py-4 px-5 rounded-2xl bg-gradient-to-br {d.color}
-					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white
-					       focus-visible:ring-offset-2 {darkMode ? 'focus-visible:ring-offset-slate-900' : 'focus-visible:ring-offset-slate-100'}"
-					style={'bgStyle' in d ? d.bgStyle : ''}
-				>
-					<!-- Label + grid size -->
-					<div class="flex flex-col items-start flex-1 min-w-0">
-						<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
-						<span class="text-white/90 text-sm">{gridCaption(d.cells, d.square)}</span>
-					</div>
-					<!-- Completion count badge -->
-					<div class="flex flex-col items-center justify-center ml-3 shrink-0 min-w-[3rem]">
-						{#if count > 0}
-							<span class="text-2xl font-extrabold text-white leading-none">{count}</span>
-							<span class="text-white/85 text-[10px] uppercase tracking-widest mt-0.5">
-								{count === 1 ? 'win' : 'wins'}
-							</span>
-						{:else}
-							<span class="text-white/30 text-xs">—</span>
-						{/if}
-					</div>
-				</button>
-			{/each}
-		</div>
-
-		</div><!-- end centered content -->
-
-		<!-- Stats button pinned to the bottom -->
-		<div class="shrink-0 flex justify-center pb-1">
-			<button
-				onclick={goToStats}
-				class="{darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'} text-sm transition-colors flex items-center gap-1.5"
-			>
-				<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-					<rect x="1" y="7" width="3" height="6" rx="0.5"/>
-					<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
-					<rect x="10" y="1" width="3" height="12" rx="0.5"/>
-				</svg>
-				Stats
-			</button>
-		</div>
 	</main>
 
 {:else if gameState === 'stats'}
@@ -1038,7 +1044,8 @@
 		<!-- ── Top bar ──────────────────────────────────────────────────────────── -->
 		<!-- h-12 = 3rem fixed; shrink-0 prevents flex from squishing it -->
 		<div class="shrink-0 flex items-center gap-2 px-3 border-b {darkMode ? 'border-slate-800/80 bg-slate-900/95' : 'border-slate-300/80 bg-slate-100/95'} backdrop-blur-sm"
-		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))">
+		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))"
+		     inert={menuOpen || won || lost}>
 
 			<!-- Hamburger button — always visible -->
 			<button
@@ -1092,11 +1099,16 @@
 				class="absolute inset-0 z-30 {darkMode ? 'bg-slate-950/40' : 'bg-slate-400/30'}"
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				onclick={() => (menuOpen = false)}
-				aria-label="Close menu"
+				tabindex="-1"
+				aria-hidden="true"
 			></button>
 
 			<!-- Panel: slides down from below the top bar -->
 			<div
+				use:trapFocus={{ onClose: () => (menuOpen = false) }}
+				role="dialog"
+				aria-modal="true"
+				aria-label="Game menu"
 				class="absolute left-0 right-0 z-40 flex flex-col gap-2 p-3 border-b shadow-xl
 				       {darkMode
 				           ? 'bg-slate-900/95 backdrop-blur-md border-slate-700/60'
@@ -1234,7 +1246,8 @@
 			  3rem  = top bar (h-12)
 			  1.5rem = padding (p-3 on each side)
 		-->
-		<div class="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+		<div class="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+		     inert={menuOpen || won || lost}>
 			<div
 				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem - env(safe-area-inset-top)) * {W / H})); aspect-ratio: {W} / {H};"
 				class="relative overflow-hidden rounded-xl touch-none"
@@ -1400,74 +1413,89 @@
 					</div>
 				{/if}
 
-				<!-- Win panel — appears after the vortex collapse finishes -->
-				{#if won && vortexDone}
-					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}"
-					     transition:fly={{ y: reducedMotion ? 0 : 16, duration: reducedMotion ? 160 : 280, opacity: 0 }}>
-						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
-						            {darkMode
-						                ? 'bg-slate-900/90 border border-slate-700/60'
-						                : 'bg-white/95 border border-slate-200/60'}">
-							<div class="text-4xl mb-2">🎉</div>
-<p class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
-<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">All {level.arrows.length} arrows cleared</p>
-<div class="flex gap-1 mt-1">
-	{#each Array(MAX_LIVES) as _, i}
-		<span class="text-lg transition-all {i < lives ? 'text-red-500' : darkMode ? 'text-slate-700' : 'text-slate-300'}">
-			{i < lives ? '♥' : '♡'}
-		</span>
-	{/each}
-</div>
-							<button
-								onclick={() => reset(false)}
-								class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
-								       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150
-								       flex items-center justify-center gap-2"
-							>
-								<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<polygon points="6,3 15,9 6,15" fill="currentColor" stroke="none"/>
-								</svg>
-								New Level
-							</button>
-							<button
-								onclick={goToMenu}
-								class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
-								       {darkMode
-								           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
-								           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
-							>← Main Menu</button>
-						</div>
-					</div>
-				{/if}
-
-				<!-- Game-over panel — centered HTML overlay, unaffected by zoom/pan -->
-				{#if lost}
-					<div class="absolute inset-0 flex items-center justify-center {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/75'}">
-						<div class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
-						            {darkMode
-						                ? 'bg-slate-900/90 border border-slate-700/60'
-						                : 'bg-white/95 border border-slate-200/60'}">
-							<div class="text-4xl mb-2">💔</div>
-<p class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
-<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
-	{level.arrows.length - removed.size} arrows left
-</p>
-							<button
-								onclick={() => reset(true)}
-								class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
-								       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
-							>↺ Try Again</button>
-							<button
-								onclick={goToMenu}
-								class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
-								       {darkMode
-								           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
-								           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
-							>← Main Menu</button>
-						</div>
-					</div>
-				{/if}
 			</div>
 		</div>
+
+		<!-- Win panel — appears after the vortex collapse finishes -->
+		<!-- Lifted out of the board container so it stays interactive when the
+		     surrounding game UI is marked inert. Covers the full screen. -->
+		{#if won && vortexDone}
+			<div class="absolute inset-0 flex items-center justify-center z-50 {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}"
+			     transition:fly={{ y: reducedMotion ? 0 : 16, duration: reducedMotion ? 160 : 280, opacity: 0 }}>
+				<div
+					use:trapFocus
+					role="alertdialog"
+					aria-modal="true"
+					aria-labelledby="win-panel-title"
+					class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
+					       {darkMode
+					           ? 'bg-slate-900/90 border border-slate-700/60'
+					           : 'bg-white/95 border border-slate-200/60'}"
+				>
+					<div class="text-4xl mb-2" aria-hidden="true">🎉</div>
+					<p id="win-panel-title" class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
+					<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">All {level.arrows.length} arrows cleared</p>
+					<div class="flex gap-1 mt-1">
+						{#each Array(MAX_LIVES) as _, i}
+							<span class="text-lg transition-all {i < lives ? 'text-red-500' : darkMode ? 'text-slate-700' : 'text-slate-300'}">
+								{i < lives ? '♥' : '♡'}
+							</span>
+						{/each}
+					</div>
+					<button
+						onclick={() => reset(false)}
+						class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
+						       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150
+						       flex items-center justify-center gap-2"
+					>
+						<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<polygon points="6,3 15,9 6,15" fill="currentColor" stroke="none"/>
+						</svg>
+						New Level
+					</button>
+					<button
+						onclick={goToMenu}
+						class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
+						       {darkMode
+						           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
+						           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
+					>← Main Menu</button>
+				</div>
+			</div>
+		{/if}
+
+		<!-- Game-over panel — full-screen, alerts the user the game is decided. -->
+		{#if lost}
+			<div class="absolute inset-0 flex items-center justify-center z-50 {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/75'}">
+				<div
+					use:trapFocus
+					role="alertdialog"
+					aria-modal="true"
+					aria-labelledby="loss-panel-title"
+					class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
+					       {darkMode
+					           ? 'bg-slate-900/90 border border-slate-700/60'
+					           : 'bg-white/95 border border-slate-200/60'}"
+				>
+					<div class="text-4xl mb-2" aria-hidden="true">💔</div>
+					<p id="loss-panel-title" class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
+					<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+						{level.arrows.length - removed.size} arrows left
+					</p>
+					<button
+						onclick={() => reset(true)}
+						class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
+						       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
+					>↺ Try Again</button>
+					<button
+						onclick={goToMenu}
+						class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
+						       {darkMode
+						           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
+						           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
+					>← Main Menu</button>
+				</div>
+			</div>
+		{/if}
 	</main>
 {/if}

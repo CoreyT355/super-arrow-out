@@ -69,8 +69,8 @@
 		} catch { return null; }
 	}
 
-	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean } {
-		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true, darkMode: true };
+	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean } {
+		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true, darkMode: true, winAnimation: true };
 		try {
 			const raw = localStorage.getItem(SETTINGS_KEY);
 			const parsed = raw ? JSON.parse(raw) : {};
@@ -78,11 +78,12 @@
 				showGrid:       parsed.showGrid       ?? true,
 				roundedCorners: parsed.roundedCorners ?? true,
 				darkMode:       parsed.darkMode       ?? true,
+				winAnimation:   parsed.winAnimation   ?? true,
 			};
-		} catch { return { showGrid: true, roundedCorners: true, darkMode: true }; }
+		} catch { return { showGrid: true, roundedCorners: true, darkMode: true, winAnimation: true }; }
 	}
 
-	function saveSettings(s: { showGrid: boolean; roundedCorners: boolean; darkMode: boolean }) {
+	function saveSettings(s: { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean }) {
 		if (typeof window === 'undefined') return;
 		localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
 	}
@@ -611,10 +612,11 @@
 	let showGrid       = $state(_settings.showGrid);
 	let roundedCorners = $state(_settings.roundedCorners);
 	let darkMode       = $state(_settings.darkMode);
+	let winAnimation   = $state(_settings.winAnimation);
 	let showLoading = $state(false);
 	let menuSettingsOpen = $state(false);
 
-	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode }); });
+	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode, winAnimation }); });
 
 	// ─── theme-aware arrow colors ────────────────────────────────────────────────
 
@@ -665,9 +667,9 @@
 		}
 	});
 
-	// Trigger vortex collapse on win; clear it when the game resets.
+	// Trigger vortex collapse on win (if enabled); clear it when the game resets.
 	$effect(() => {
-		if (won && !vortexAnim) {
+		if (won && !vortexAnim && winAnimation) {
 			vortexAnim = { startTime: performance.now() };
 			// Spawn star particles spread across the board, spiraling inward
 			const cx = W / 2, cy = H / 2;
@@ -786,6 +788,41 @@
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
 					</button>
 				</label>
+
+				<!-- Win Animation -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-2">
+					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Win Animation</span>
+					<button
+						role="switch" aria-checked={winAnimation}
+						onclick={() => (winAnimation = !winAnimation)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
+
+				<!-- Divider -->
+				<div class="my-1 border-t {darkMode ? 'border-slate-700/60' : 'border-slate-200'}"></div>
+
+				<!-- Stats link -->
+				<button
+					onclick={() => { menuSettingsOpen = false; goToStats(); }}
+					class="flex items-center justify-between w-full px-1 py-2 rounded-lg transition-colors
+					       {darkMode ? 'text-slate-200 hover:text-white' : 'text-slate-700 hover:text-slate-900'}"
+				>
+					<span class="flex items-center gap-2 text-sm">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+							<rect x="1" y="7" width="3" height="6" rx="0.5"/>
+							<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
+							<rect x="10" y="1" width="3" height="12" rx="0.5"/>
+						</svg>
+						Stats
+					</span>
+					<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="opacity-40">
+						<polyline points="5,3 9,7 5,11"/>
+					</svg>
+				</button>
 			</div>
 		{/if}
 		<div class="text-center">
@@ -823,19 +860,22 @@
 			{/each}
 		</div>
 
-		<button
-			onclick={goToStats}
-			class="{darkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} text-sm transition-colors mt-2 flex items-center gap-1.5"
-		>
-			<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-				<rect x="1" y="7" width="3" height="6" rx="0.5"/>
-				<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
-				<rect x="10" y="1" width="3" height="12" rx="0.5"/>
-			</svg>
-			Stats
-		</button>
-
 		</div><!-- end centered content -->
+
+		<!-- Stats button pinned to the bottom -->
+		<div class="shrink-0 flex justify-center pb-1">
+			<button
+				onclick={goToStats}
+				class="{darkMode ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-600'} text-sm transition-colors flex items-center gap-1.5"
+			>
+				<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="1" y="7" width="3" height="6" rx="0.5"/>
+					<rect x="5.5" y="4" width="3" height="9" rx="0.5"/>
+					<rect x="10" y="1" width="3" height="12" rx="0.5"/>
+				</svg>
+				Stats
+			</button>
+		</div>
 	</main>
 
 {:else if gameState === 'stats'}
@@ -1099,6 +1139,21 @@
 					>
 						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
 						             {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
+					</button>
+				</label>
+
+				<!-- Toggle: Win Animation -->
+				<label class="flex items-center justify-between cursor-pointer select-none px-1 py-0.5">
+					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Win Animation</span>
+					<button
+						role="switch"
+						aria-checked={winAnimation}
+						onclick={() => (winAnimation = !winAnimation)}
+						class="relative w-10 h-6 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
+					>
+						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
+						             {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
 					</button>
 				</label>
 			</div>

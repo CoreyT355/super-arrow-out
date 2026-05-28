@@ -88,6 +88,28 @@
 		localStorage.removeItem(IN_PROGRESS_KEY);
 	}
 
+	type InProgress = { removed: number[]; markedRed: number[]; lives: number; currentDifficulty: string | null };
+
+	function loadInProgress(): InProgress | null {
+		if (typeof window === 'undefined') return null;
+		try {
+			const raw = localStorage.getItem(IN_PROGRESS_KEY);
+			return raw ? JSON.parse(raw) : null;
+		} catch { return null; }
+	}
+
+	// Pair the saved in-progress state with its puzzle. Returns null when there's
+	// nothing worth resuming: no progress made, already cleared, or game was lost.
+	function loadResume(): { inProgress: InProgress; puzzle: Level } | null {
+		const inProgress = loadInProgress();
+		const puzzle = loadPuzzle();
+		if (!inProgress || !puzzle) return null;
+		if (inProgress.removed.length === 0) return null;
+		if (inProgress.removed.length >= puzzle.arrows.length) return null;
+		if (inProgress.lives <= 0) return null;
+		return { inProgress, puzzle };
+	}
+
 	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean } {
 		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true, darkMode: true, winAnimation: true };
 		try {
@@ -124,6 +146,11 @@
 	// Initialise from storage immediately on the client (guard keeps SSR safe).
 	let progress = $state<Record<string, number>>(loadProgress());
 	let streak   = $state(loadStreak());
+
+	// Resume prompt: snapshot of any in-progress puzzle, offered on the menu.
+	let resume          = $state(loadResume());
+	let resumeDismissed = $state(false);
+	const resumeOpen    = $derived(resume !== null && !resumeDismissed);
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
@@ -621,8 +648,34 @@
 		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
 		level             = await generateInWorker(w, h);
 		savePuzzle(level);
+		clearInProgress();
 		resetView();
 		showLoading = false;
+	}
+
+	// Restore a saved puzzle and its mid-play state, then jump straight into the game.
+	function resumePuzzle() {
+		if (!resume) return;
+		const { inProgress, puzzle } = resume;
+		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+		level             = puzzle;
+		W                 = puzzle.width;
+		H                 = puzzle.height;
+		removed           = new Set(inProgress.removed);
+		markedRed         = new Set(inProgress.markedRed);
+		anims             = {};
+		lives             = inProgress.lives;
+		winCounted        = false;
+		lostCounted       = false;
+		currentDifficulty = inProgress.currentDifficulty;
+		menuOpen          = false;
+		resetView();
+		gameState         = 'playing';
+	}
+
+	// Decline the resume offer — hide the prompt for this session, keep the data.
+	function dismissResume() {
+		resumeDismissed = true;
 	}
 
 	// reuse=true  → restore the saved puzzle (Try Again after game-over)
@@ -641,6 +694,7 @@
 			level = generateLevel(W, H);
 			savePuzzle(level);
 		}
+		clearInProgress();
 		resetView();
 	}
 
@@ -651,8 +705,11 @@
 		anims     = {};
 		menuOpen  = false;
 		resetView();
-		clearInProgress();
-		gameState = 'menu';
+		// Re-read storage so a puzzle abandoned mid-game can be resumed later.
+		// Won/lost games have already cleared their in-progress state.
+		resume          = loadResume();
+		resumeDismissed = false;
+		gameState       = 'menu';
 	}
 
 	function goToStats() { gameState = 'stats'; }
@@ -736,8 +793,9 @@
 		}
 	});
 
-	// Persist in-progress state whenever an arrow is successfully removed.
-	// Skips when: not playing, nothing removed yet, or the board is already won.
+	// Persist in-progress state on every play-state change (arrow removed, life
+	// lost) once at least one arrow is gone. Skips when not playing or won; a lost
+	// game is filtered out at load time by the lives guard in loadResume().
 	$effect(() => {
 		if (gameState !== 'playing' || removed.size === 0 || won) return;
 		saveInProgress();
@@ -750,6 +808,8 @@
 			const nextStreak = { current: 0, best: streak.best };
 			streak = nextStreak;
 			saveStreak(nextStreak);
+			// Game over — nothing to resume.
+			clearInProgress();
 		}
 	});
 
@@ -787,7 +847,7 @@
 	      style="padding-top: max(1.5rem, env(safe-area-inset-top))">
 
 		<!-- Top row: gear button right-aligned -->
-		<div class="flex justify-end shrink-0" inert={menuSettingsOpen}>
+		<div class="flex justify-end shrink-0" inert={menuSettingsOpen || resumeOpen}>
 			<button
 				onclick={() => (menuSettingsOpen = true)}
 				class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
@@ -804,7 +864,7 @@
 		</div>
 
 		<!-- Centered content -->
-		<div class="flex-1 flex flex-col items-center justify-center gap-6" inert={menuSettingsOpen}>
+		<div class="flex-1 flex flex-col items-center justify-center gap-6" inert={menuSettingsOpen || resumeOpen}>
 			<div class="text-center">
 			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
 			<!-- <p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p> -->
@@ -844,7 +904,7 @@
 		</div><!-- end centered content -->
 
 		<!-- Stats button pinned to the bottom -->
-		<div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen}>
+		<div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen || resumeOpen}>
 			<button
 				onclick={goToStats}
 				class="{darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'} text-sm transition-colors flex items-center gap-1.5"
@@ -997,6 +1057,50 @@
 						<polyline points="5,3 9,7 5,11"/>
 					</svg>
 				</button>
+			</div>
+		{/if}
+
+		<!-- Resume prompt: offered when a puzzle was left in progress (outside inert chrome) -->
+		{#if resumeOpen && resume}
+			{@const arrowsLeft = resume.puzzle.arrows.length - resume.inProgress.removed.length}
+			<button
+				class="absolute inset-0 z-40 {darkMode ? 'bg-slate-950/50' : 'bg-slate-400/40'}"
+				onclick={dismissResume}
+				tabindex="-1"
+				aria-hidden="true"
+			></button>
+			<div
+				use:trapFocus={{ onClose: dismissResume }}
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="resume-title"
+				class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-72 flex flex-col gap-4 p-6 rounded-2xl shadow-2xl
+				       {darkMode
+				           ? 'bg-slate-800 border border-slate-700/60'
+				           : 'bg-white border border-slate-200'}"
+				transition:fly={{ y: reducedMotion ? 0 : 8, duration: reducedMotion ? 120 : 180, opacity: 0 }}
+			>
+				<div class="text-center">
+					<p id="resume-title" class="text-xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight">Resume puzzle?</p>
+					<p class="mt-1 text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+						{resume.inProgress.currentDifficulty ?? 'Puzzle'} — {arrowsLeft} {arrowsLeft === 1 ? 'arrow' : 'arrows'} left
+					</p>
+				</div>
+				<button
+					onclick={resumePuzzle}
+					class="w-full px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
+					       text-white font-bold shadow-lg shadow-emerald-900/40 transition-all duration-150
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2
+					       {darkMode ? 'focus-visible:ring-offset-slate-800' : 'focus-visible:ring-offset-white'}"
+				>Resume</button>
+				<button
+					onclick={dismissResume}
+					class="w-full px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					       {darkMode
+					           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
+					           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
+				>Not now</button>
 			</div>
 		{/if}
 	</main>

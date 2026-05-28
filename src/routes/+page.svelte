@@ -39,10 +39,11 @@
 
 	// ─── local-storage helpers ──────────────────────────────────────────────────
 
-	const STORAGE_KEY   = 'arrow-out-progress';
-	const PUZZLE_KEY    = 'arrow-out-puzzle';
-	const SETTINGS_KEY  = 'arrow-out-settings';
-	const STREAK_KEY    = 'arrow-out-streak';
+	const STORAGE_KEY      = 'arrow-out-progress';
+	const PUZZLE_KEY       = 'arrow-out-puzzle';
+	const SETTINGS_KEY     = 'arrow-out-settings';
+	const STREAK_KEY       = 'arrow-out-streak';
+	const IN_PROGRESS_KEY  = 'arrow-out-in-progress';
 
 	// Returns {} on server (SSR) or on parse error.
 	function loadProgress(): Record<string, number> {
@@ -68,6 +69,23 @@
 			const raw = localStorage.getItem(PUZZLE_KEY);
 			return raw ? JSON.parse(raw) : null;
 		} catch { return null; }
+	}
+
+	function saveInProgress() {
+		if (typeof window === 'undefined') return;
+		try {
+			localStorage.setItem(IN_PROGRESS_KEY, JSON.stringify({
+				removed:           [...removed],
+				markedRed:         [...markedRed],
+				lives,
+				currentDifficulty,
+			}));
+		} catch {}
+	}
+
+	function clearInProgress() {
+		if (typeof window === 'undefined') return;
+		localStorage.removeItem(IN_PROGRESS_KEY);
 	}
 
 	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean } {
@@ -633,6 +651,7 @@
 		anims     = {};
 		menuOpen  = false;
 		resetView();
+		clearInProgress();
 		gameState = 'menu';
 	}
 
@@ -712,7 +731,16 @@
 			const nextStreak = { current: streak.current + 1, best: Math.max(streak.best, streak.current + 1) };
 			streak = nextStreak;
 			saveStreak(nextStreak);
+			// Puzzle complete — no in-progress state to resume
+			clearInProgress();
 		}
+	});
+
+	// Persist in-progress state whenever an arrow is successfully removed.
+	// Skips when: not playing, nothing removed yet, or the board is already won.
+	$effect(() => {
+		if (gameState !== 'playing' || removed.size === 0 || won) return;
+		saveInProgress();
 	});
 
 	// Reset streak when the player loses.

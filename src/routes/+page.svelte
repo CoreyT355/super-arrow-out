@@ -18,6 +18,8 @@
 		{ label: 'Expert',     cells:  4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48', hidden: false },
 		{ label: 'Ludicrous', cells: 16384, square: false, color: 'from-fuchsia-500 to-fuchsia-600', ring: 'ring-fuchsia-400', chartColor: '#d946ef', hidden: false,
 		  bgStyle: 'background:repeating-linear-gradient(0deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),repeating-linear-gradient(90deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),linear-gradient(135deg,#d946ef,#a21caf)' },
+		{ label: 'The Iron Tangle', cells: 32400, square: false, color: 'from-zinc-500 to-zinc-700', ring: 'ring-zinc-400', chartColor: '#71717a', hidden: true,
+		  bgStyle: 'background:linear-gradient(rgba(0,0,0,0.25),rgba(0,0,0,0.25)),url(/iron-tangle-bg.svg) center/cover,linear-gradient(135deg,#52525b,#27272a);text-shadow:0 1px 3px rgba(0,0,0,0.7)' },
 	];
 
 	const ENABLED_DIFFICULTIES = DIFFICULTIES.filter(d => !d.hidden);
@@ -44,6 +46,7 @@
 	const PUZZLE_KEY    = 'arrow-out-puzzle';
 	const SETTINGS_KEY  = 'arrow-out-settings';
 	const STREAK_KEY    = 'arrow-out-streak';
+	const RESUME_KEY    = 'arrow-out-resume';
 
 	// Returns {} on server (SSR) or on parse error.
 	function loadProgress(): Record<string, number> {
@@ -104,9 +107,43 @@
 		localStorage.setItem(STREAK_KEY, JSON.stringify(s));
 	}
 
+	interface ResumeData {
+		removedIds:   number[];
+		markedRedIds: number[];
+		lives:        number;
+		difficulty:   string | null;
+		W:            number;
+		H:            number;
+		totalArrows:  number;
+	}
+
+	function saveResume(r: ResumeData) {
+		if (typeof window === 'undefined') return;
+		try { localStorage.setItem(RESUME_KEY, JSON.stringify(r)); } catch {}
+	}
+
+	function loadResume(): ResumeData | null {
+		if (typeof window === 'undefined') return null;
+		try {
+			const raw = localStorage.getItem(RESUME_KEY);
+			if (!raw) return null;
+			const r = JSON.parse(raw) as ResumeData;
+			// Sanity-check required fields so stale/corrupt data is silently dropped.
+			if (!Array.isArray(r.removedIds) || typeof r.lives !== 'number' || !r.W || !r.H)
+				return null;
+			return r;
+		} catch { return null; }
+	}
+
+	function clearResume() {
+		if (typeof window === 'undefined') return;
+		localStorage.removeItem(RESUME_KEY);
+	}
+
 	// Initialise from storage immediately on the client (guard keeps SSR safe).
-	let progress = $state<Record<string, number>>(loadProgress());
-	let streak   = $state(loadStreak());
+	let progress    = $state<Record<string, number>>(loadProgress());
+	let streak      = $state(loadStreak());
+	let resumeState = $state<ResumeData | null>(loadResume());
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
@@ -687,6 +724,7 @@
 		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
 		level             = await generateInWorker(w, h);
 		savePuzzle(level);
+		clearResume();
 		resetView();
 		showLoading = false;
 	}
@@ -701,6 +739,7 @@
 		lives       = MAX_LIVES;
 		winCounted  = false;
 		lostCounted = false;
+		clearResume();
 		if (reuse) {
 			level = loadPuzzle() ?? generateLevel(W, H);
 		} else {
@@ -806,6 +845,59 @@
 	const won  = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
 	const lost = $derived(lives <= 0 && !won);
 
+	// ─── resume-state persistence ─────────────────────────────────────────────────
+
+	// Auto-save in-progress state whenever arrows are removed. Clears on
+	// win/lose so a completed or dead game never shows as resumable.
+	$effect(() => {
+		if (gameState !== 'playing') return;
+		if (won || lost) {
+			clearResume();
+			resumeState = null;
+			return;
+		}
+		if (removed.size === 0) return; // no progress yet — nothing worth saving
+		const data: ResumeData = {
+			removedIds:   [...removed],
+			markedRedIds: [...markedRed],
+			lives,
+			difficulty:   currentDifficulty,
+			W,
+			H,
+			totalArrows:  level.arrows.length,
+		};
+		saveResume(data);
+		resumeState = data;
+	});
+
+	async function resumeGame() {
+		const r = resumeState ?? loadResume();
+		if (!r) return;
+		const savedLevel = loadPuzzle();
+		if (!savedLevel || savedLevel.width !== r.W || savedLevel.height !== r.H) {
+			// Saved puzzle doesn't match resume metadata — stale data, discard.
+			clearResume();
+			resumeState = null;
+			return;
+		}
+
+		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+		gameState = 'playing';
+		W = r.W; H = r.H;
+		currentDifficulty = r.difficulty;
+		winCounted  = false;
+		lostCounted = false;
+		menuOpen    = false;
+		level    = savedLevel;
+		removed  = new Set(r.removedIds);
+		markedRed = new Set(r.markedRedIds);
+		lives    = r.lives;
+		anims    = {};
+		resetView();
+	}
+
+	// ─── completion tracking ──────────────────────────────────────────────────────
+
 	// Record a completion when the player clears the board.
 	// winCounted is a plain bool (not reactive) so this fires exactly once per game.
 	$effect(() => {
@@ -864,11 +956,12 @@
 	<main class="relative w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
 	      style="padding-top: max(1.5rem, env(safe-area-inset-top))">
 
-		<!-- Top row: gear button right-aligned -->
-		<div class="flex justify-end shrink-0" inert={menuSettingsOpen}>
+		<!-- Top row: centered title with gear button right-aligned -->
+		<div class="relative flex items-center justify-center shrink-0 h-11" inert={menuSettingsOpen}>
+			<h1 class="text-3xl md:text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight">Super Arrow Out</h1>
 			<button
 				onclick={() => (menuSettingsOpen = true)}
-				class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
+				class="absolute right-0 top-1/2 -translate-y-1/2 flex items-center justify-center w-11 h-11 rounded-lg transition-colors
 				       {darkMode
 				           ? 'bg-slate-700 text-slate-100 hover:bg-slate-600 hover:text-white'
 				           : 'bg-slate-300 text-slate-800 hover:bg-slate-400 hover:text-slate-900'}"
@@ -881,14 +974,54 @@
 			</button>
 		</div>
 
-		<!-- Centered content -->
-		<div class="flex-1 flex flex-col items-center justify-center gap-6" inert={menuSettingsOpen}>
-			<div class="text-center">
-			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
-			<!-- <p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p> -->
-		</div>
+		<!-- Centered content — overflow-y-auto + my-auto keeps items centred when
+		     they fit and lets them scroll when they don't (e.g. many difficulty
+		     buttons on a short screen). -->
+		<div class="flex-1 flex flex-col items-center overflow-y-auto" inert={menuSettingsOpen}>
+			<div class="my-auto flex flex-col items-center gap-6 w-full py-4">
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
+			{#if resumeState}
+				{@const remaining = resumeState.totalArrows - resumeState.removedIds.length}
+				<button
+					onclick={resumeGame}
+					class="flex items-center gap-4 py-4 px-5 rounded-2xl border-2 transition-all duration-150
+					       hover:scale-[1.02] active:scale-[0.98]
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					       {darkMode
+					           ? 'bg-emerald-950/60 border-emerald-700 hover:bg-emerald-900/70'
+					           : 'bg-emerald-50 border-emerald-400 hover:bg-emerald-100'}"
+				>
+					<!-- Play icon -->
+					<span class="shrink-0 flex items-center justify-center w-10 h-10 rounded-full
+					             {darkMode ? 'bg-emerald-700' : 'bg-emerald-500'}">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="white">
+							<polygon points="3,1 13,7 3,13"/>
+						</svg>
+					</span>
+					<div class="flex flex-col items-start flex-1 min-w-0">
+						<div class="flex items-center justify-between w-full">
+							<span class="font-bold text-base {darkMode ? 'text-emerald-300' : 'text-emerald-700'}">
+								Resume Puzzle
+							</span>
+							<!-- Lives remaining -->
+							<div class="flex gap-0.5" aria-label="{resumeState.lives} lives remaining">
+								{#each Array(MAX_LIVES) as _, i}
+									<span class="text-base {i < resumeState.lives
+										? (darkMode ? 'text-red-400' : 'text-red-500')
+										: (darkMode ? 'text-slate-700' : 'text-slate-300')}">
+										{i < resumeState.lives ? '♥' : '♡'}
+									</span>
+								{/each}
+							</div>
+						</div>
+						<span class="text-sm {darkMode ? 'text-emerald-500' : 'text-emerald-600'}">
+							{resumeState.difficulty ?? 'Custom'} · {remaining} arrow{remaining === 1 ? '' : 's'} left
+						</span>
+					</div>
+				</button>
+			{/if}
+
 			{#each ENABLED_DIFFICULTIES as d}
 				{@const count = progress[d.label] ?? 0}
 				<button
@@ -919,7 +1052,8 @@
 			{/each}
 		</div>
 
-		</div><!-- end centered content -->
+		</div><!-- end my-auto wrapper -->
+		</div><!-- end overflow-y-auto -->
 
 		<!-- Stats button pinned to the bottom -->
 		<div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen}>
@@ -1187,7 +1321,7 @@
 		<!-- h-12 = 3rem fixed; shrink-0 prevents flex from squishing it -->
 		<div class="shrink-0 flex items-center gap-2 px-3 border-b {darkMode ? 'border-slate-800/80 bg-slate-900/95' : 'border-slate-300/80 bg-slate-100/95'} backdrop-blur-sm"
 		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))"
-		     inert={menuOpen || won || lost}>
+		     inert={won || lost}>
 
 			<!-- Hamburger button — always visible -->
 			<button
@@ -1268,23 +1402,6 @@
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				transition:fly={{ y: reducedMotion ? 0 : -6, duration: reducedMotion ? 120 : 160, opacity: 0 }}
 			>
-				<!-- Close button — explicit dismissal target for keyboard and SR users.
-				     The hamburger that opened this is inert while the dialog is open. -->
-				<div class="flex justify-end">
-					<button
-						onclick={() => (menuOpen = false)}
-						aria-label="Close menu"
-						class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
-						       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
-						       {darkMode
-						           ? 'text-slate-400 hover:bg-slate-800 hover:text-white'
-						           : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}"
-					>
-						<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
-							<line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
-						</svg>
-					</button>
-				</div>
 				<div class="flex gap-2">
 					<button
 						onclick={() => { goToMenu(); menuOpen = false; }}

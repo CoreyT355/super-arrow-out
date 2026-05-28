@@ -958,7 +958,7 @@
 
 		<!-- Top row: centered title with gear button right-aligned -->
 		<div class="relative flex items-center justify-center shrink-0 h-11" inert={menuSettingsOpen}>
-			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight">Super Arrow Out</h1>
+			<h1 class="text-3xl md:text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight">Super Arrow Out</h1>
 			<button
 				onclick={() => (menuSettingsOpen = true)}
 				class="absolute right-0 top-1/2 -translate-y-1/2 flex items-center justify-center w-11 h-11 rounded-lg transition-colors

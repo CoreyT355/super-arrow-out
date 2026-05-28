@@ -324,11 +324,47 @@
 			scale = s; panX = c.x; panY = c.y;
 		}
 
+		// Apple Pencil fires PointerEvents (pointerType='pen') rather than
+		// TouchEvents, so the touch handlers above never see pencil input.
+		// These mirror the single-touch pan logic specifically for the pen.
+		// Touch identifiers are always >= 0, so -1 is a safe dedicated key.
+		const PEN_KEY = -1;
+
+		function onPenDown(e: PointerEvent) {
+			if (e.pointerType !== 'pen') return;
+			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
+			_t0 = { x: e.clientX, y: e.clientY };
+			_panX0 = panX; _panY0 = panY; _didMove = false;
+		}
+
+		function onPenMove(e: PointerEvent) {
+			if (e.pointerType !== 'pen' || !_activeT.has(PEN_KEY)) return;
+			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
+			const t = _activeT.get(PEN_KEY)!;
+			const dx = t.x - _t0.x, dy = t.y - _t0.y;
+			if (Math.hypot(dx, dy) > 4) _didMove = true;
+			if (_didMove) {
+				e.preventDefault(); // stop browser scroll during pen pan
+				const c = clampPan(_panX0 + dx, _panY0 + dy, scale);
+				panX = c.x; panY = c.y;
+			}
+		}
+
+		function onPenUp(e: PointerEvent) {
+			if (e.pointerType !== 'pen') return;
+			_activeT.delete(PEN_KEY);
+			if (_activeT.size === 0 && scale < 1.05) resetView();
+		}
+
 		node.addEventListener('touchstart',  onTouchStart, { passive: true  });
 		node.addEventListener('touchmove',   onTouchMove,  { passive: false }); // ← non-passive
 		node.addEventListener('touchend',    onTouchEnd,   { passive: true  });
 		node.addEventListener('touchcancel', onTouchEnd,   { passive: true  });
 		node.addEventListener('wheel',       onWheel,      { passive: false });
+		node.addEventListener('pointerdown',   onPenDown, { passive: true  });
+		node.addEventListener('pointermove',   onPenMove, { passive: false }); // ← non-passive for preventDefault
+		node.addEventListener('pointerup',     onPenUp,   { passive: true  });
+		node.addEventListener('pointercancel', onPenUp,   { passive: true  });
 
 		return {
 			destroy() {
@@ -338,6 +374,10 @@
 				node.removeEventListener('touchend',    onTouchEnd);
 				node.removeEventListener('touchcancel', onTouchEnd);
 				node.removeEventListener('wheel',       onWheel);
+				node.removeEventListener('pointerdown',   onPenDown);
+				node.removeEventListener('pointermove',   onPenMove);
+				node.removeEventListener('pointerup',     onPenUp);
+				node.removeEventListener('pointercancel', onPenUp);
 				_node = null;
 			}
 		};
@@ -1428,7 +1468,9 @@
 								{@const sd        = staticArrowData[arrow.id]}
 								{@const penalized = markedRed.has(arrow.id)}
 								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
-								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer" opacity={0.95}>
+								<g onclick={() => handleClick(arrow.id)}
+								   onpointerup={(e) => { if (e.pointerType === 'pen' && !_didMove) handleClick(arrow.id); }}
+								   style="cursor:pointer" opacity={0.95}>
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
 									{/each}

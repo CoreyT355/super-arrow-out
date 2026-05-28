@@ -850,11 +850,12 @@
 	<main class="relative w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col p-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
 	      style="padding-top: max(1.5rem, env(safe-area-inset-top))">
 
-		<!-- Top row: gear button right-aligned -->
-		<div class="flex justify-end shrink-0" inert={menuSettingsOpen}>
+		<!-- Top row: centered title with gear button right-aligned -->
+		<div class="relative flex items-center justify-center shrink-0 h-11" inert={menuSettingsOpen}>
+			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight">Super Arrow Out</h1>
 			<button
 				onclick={() => (menuSettingsOpen = true)}
-				class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
+				class="absolute right-0 top-1/2 -translate-y-1/2 flex items-center justify-center w-11 h-11 rounded-lg transition-colors
 				       {darkMode
 				           ? 'bg-slate-700 text-slate-100 hover:bg-slate-600 hover:text-white'
 				           : 'bg-slate-300 text-slate-800 hover:bg-slate-400 hover:text-slate-900'}"
@@ -872,10 +873,6 @@
 		     buttons on a short screen). -->
 		<div class="flex-1 flex flex-col items-center overflow-y-auto" inert={menuSettingsOpen}>
 			<div class="my-auto flex flex-col items-center gap-6 w-full py-4">
-			<div class="text-center">
-			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
-			<!-- <p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p> -->
-		</div>
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
 			{#if resumeState}
@@ -897,22 +894,24 @@
 						</svg>
 					</span>
 					<div class="flex flex-col items-start flex-1 min-w-0">
-						<span class="font-bold text-base {darkMode ? 'text-emerald-300' : 'text-emerald-700'}">
-							Resume Puzzle
-						</span>
+						<div class="flex items-center justify-between w-full">
+							<span class="font-bold text-base {darkMode ? 'text-emerald-300' : 'text-emerald-700'}">
+								Resume Puzzle
+							</span>
+							<!-- Lives remaining -->
+							<div class="flex gap-0.5" aria-label="{resumeState.lives} lives remaining">
+								{#each Array(MAX_LIVES) as _, i}
+									<span class="text-base {i < resumeState.lives
+										? (darkMode ? 'text-red-400' : 'text-red-500')
+										: (darkMode ? 'text-slate-700' : 'text-slate-300')}">
+										{i < resumeState.lives ? '♥' : '♡'}
+									</span>
+								{/each}
+							</div>
+						</div>
 						<span class="text-sm {darkMode ? 'text-emerald-500' : 'text-emerald-600'}">
 							{resumeState.difficulty ?? 'Custom'} · {remaining} arrow{remaining === 1 ? '' : 's'} left
 						</span>
-					</div>
-					<!-- Lives remaining -->
-					<div class="flex gap-0.5 shrink-0" aria-label="{resumeState.lives} lives remaining">
-						{#each Array(MAX_LIVES) as _, i}
-							<span class="text-base {i < resumeState.lives
-								? (darkMode ? 'text-red-400' : 'text-red-500')
-								: (darkMode ? 'text-slate-700' : 'text-slate-300')}">
-								{i < resumeState.lives ? '♥' : '♡'}
-							</span>
-						{/each}
 					</div>
 				</button>
 			{/if}
@@ -1216,7 +1215,7 @@
 		<!-- h-12 = 3rem fixed; shrink-0 prevents flex from squishing it -->
 		<div class="shrink-0 flex items-center gap-2 px-3 border-b {darkMode ? 'border-slate-800/80 bg-slate-900/95' : 'border-slate-300/80 bg-slate-100/95'} backdrop-blur-sm"
 		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))"
-		     inert={menuOpen || won || lost}>
+		     inert={won || lost}>
 
 			<!-- Hamburger button — always visible -->
 			<button
@@ -1297,23 +1296,6 @@
 				style="top: calc(3rem + env(safe-area-inset-top))"
 				transition:fly={{ y: reducedMotion ? 0 : -6, duration: reducedMotion ? 120 : 160, opacity: 0 }}
 			>
-				<!-- Close button — explicit dismissal target for keyboard and SR users.
-				     The hamburger that opened this is inert while the dialog is open. -->
-				<div class="flex justify-end">
-					<button
-						onclick={() => (menuOpen = false)}
-						aria-label="Close menu"
-						class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors
-						       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
-						       {darkMode
-						           ? 'text-slate-400 hover:bg-slate-800 hover:text-white'
-						           : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'}"
-					>
-						<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
-							<line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
-						</svg>
-					</button>
-				</div>
 				<div class="flex gap-2">
 					<button
 						onclick={() => { goToMenu(); menuOpen = false; }}

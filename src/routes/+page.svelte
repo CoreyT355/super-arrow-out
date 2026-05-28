@@ -354,6 +354,21 @@
 			if (e.pointerType !== 'pen') return;
 			_activeT.delete(PEN_KEY);
 			if (_activeT.size === 0 && scale < 1.05) resetView();
+
+			// If the pen didn't pan, treat the lift as a tap and dispatch to the
+			// arrow under the pencil tip. We use elementFromPoint + data-arrow-id
+			// rather than individual onpointerup handlers on each <g> to avoid
+			// bubbling ambiguity and double-fires from synthesised click events.
+			if (!_didMove) {
+				let el = document.elementFromPoint(e.clientX, e.clientY) as Element | null;
+				while (el && !el.hasAttribute('data-arrow-id')) {
+					el = el.parentElement;
+				}
+				const rawId = el?.getAttribute('data-arrow-id');
+				if (rawId !== null && rawId !== undefined) {
+					handleClick(parseInt(rawId, 10));
+				}
+			}
 		}
 
 		node.addEventListener('touchstart',  onTouchStart, { passive: true  });
@@ -1469,7 +1484,7 @@
 								{@const penalized = markedRed.has(arrow.id)}
 								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
 								<g onclick={() => handleClick(arrow.id)}
-								   onpointerup={(e) => { if (e.pointerType === 'pen' && !_didMove) handleClick(arrow.id); }}
+								   data-arrow-id={arrow.id}
 								   style="cursor:pointer" opacity={0.95}>
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />

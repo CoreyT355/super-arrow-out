@@ -22,19 +22,14 @@ const INWARD: Record<Direction, GridPos> = {
 
 type Grid = ('empty' | 'occupied')[][];
 
+const STEPS: ReadonlyArray<readonly [number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
 function makeGrid(w: number, h: number): Grid {
     return Array.from({ length: h }, () => Array<'empty' | 'occupied'>(w).fill('empty'));
 }
 
 function inBounds(x: number, y: number, w: number, h: number): boolean {
     return x >= 0 && x < w && y >= 0 && y < h;
-}
-
-function allOccupied(grid: Grid, w: number, h: number): boolean {
-    for (let y = 0; y < h; y++)
-        for (let x = 0; x < w; x++)
-            if (grid[y][x] === 'empty') return false;
-    return true;
 }
 
 function clearPathToEdge(grid: Grid, sx: number, sy: number, dx: number, dy: number, w: number, h: number): boolean {
@@ -83,34 +78,51 @@ function getExitDirs(grid: Grid, x: number, y: number, w: number, h: number): Di
     return shuffle(dirs);
 }
 
-// Returns the sizes of all connected components of empty cells.
-function emptyPocketSizes(grid: Grid, w: number, h: number): number[] {
-    const visited = new Set<number>();
-    const sizes: number[] = [];
-    const key = (x: number, y: number) => y * w + x;
-
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-            if (grid[y][x] !== 'empty' || visited.has(key(x, y))) continue;
-            const queue = [{ x, y }];
-            visited.add(key(x, y));
-            let size = 0;
-            while (queue.length > 0) {
-                const { x: cx, y: cy } = queue.shift()!;
-                size++;
-                for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-                    const nx = cx + dx, ny = cy + dy;
-                    if (inBounds(nx, ny, w, h) && grid[ny][nx] === 'empty' && !visited.has(key(nx, ny))) {
-                        visited.add(key(nx, ny));
-                        queue.push({ x: nx, y: ny });
-                    }
+// Walk the empty cells adjacent to a freshly placed arrow's path and check
+// whether any of them sit in a pocket smaller than `minSize`. Each BFS stops
+// as soon as the pocket reaches minSize, so the work per check is O(path *
+// minSize) rather than O(width * height) — important on large grids where the
+// dead-pocket check fires after every accepted placement.
+function hasDeadPocketNear(
+    grid: Grid,
+    path: GridPos[],
+    minSize: number,
+    w: number,
+    h: number,
+): boolean {
+    if (minSize <= 1) return false;
+    const visited = new Uint8Array(w * h);
+    const queue: number[] = [];
+    for (const p of path) {
+        for (const [dx, dy] of STEPS) {
+            const nx = p.x + dx, ny = p.y + dy;
+            if (!inBounds(nx, ny, w, h) || grid[ny][nx] !== 'empty') continue;
+            const start = ny * w + nx;
+            if (visited[start]) continue;
+            queue.length = 0;
+            queue.push(start);
+            visited[start] = 1;
+            let count = 0;
+            let head = 0;
+            while (head < queue.length && count < minSize) {
+                const k = queue[head++];
+                count++;
+                const cx = k % w;
+                const cy = (k - cx) / w;
+                for (const [ddx, ddy] of STEPS) {
+                    const mx = cx + ddx, my = cy + ddy;
+                    if (mx < 0 || mx >= w || my < 0 || my >= h) continue;
+                    if (grid[my][mx] !== 'empty') continue;
+                    const mk = my * w + mx;
+                    if (visited[mk]) continue;
+                    visited[mk] = 1;
+                    queue.push(mk);
                 }
             }
-            sizes.push(size);
+            if (count < minSize) return true;
         }
     }
-
-    return sizes;
+    return false;
 }
 
 // Count how many already-placed arrows in a square window around (cx,cy) exit
@@ -280,8 +292,9 @@ function absorbShortArrows(arrows: Arrow[], minLen: number): Arrow[] {
         // from hoarding all of the merged blocks.
         const indices = shuffle(Array.from({ length: result.length }, (_, idx) => idx));
 
+        let merged = false;
         for (const i of indices) {
-            if (i === badIdx || i >= result.length) continue; 
+            if (i === badIdx || i >= result.length) continue;
             const other = result[i];
             const tail = other.path[other.path.length - 1];
 
@@ -297,6 +310,80 @@ function absorbShortArrows(arrows: Arrow[], minLen: number): Arrow[] {
             result[i] = { ...other, path: [...other.path, ...extension] };
             result.splice(badIdx, 1);
             changed = true;
+            merged = true;
+            break;
+        }
+
+        // The bad arrow has no mergeable neighbor (its endpoints don't sit
+        // next to any other arrow's tail). Stop the loop instead of spinning;
+        // a short arrow is a much better outcome than the previous behavior
+        // of leaving the cells empty entirely.
+        if (!merged) break;
+    }
+
+    return result;
+}
+
+// Tail-walk fill: extends arrow tails into adjacent empty cells one step at
+// a time. Uses a queue seeded with empties that border a tail, and pushes new
+// neighbours onto the queue as each absorption exposes them. Linear in the
+// grid size, where the previous version re-scanned the whole grid per pass.
+function fillEmptyCells(arrows: Arrow[], grid: Grid, w: number, h: number): Arrow[] {
+    const result = arrows.map(a => ({ ...a, path: [...a.path] }));
+
+    const tailOf = new Map<number, number>();
+    for (let i = 0; i < result.length; i++) {
+        const t = result[i].path[result[i].path.length - 1];
+        tailOf.set(t.y * w + t.x, i);
+    }
+
+    const queue: number[] = [];
+    const inQueue = new Uint8Array(w * h);
+
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (grid[y][x] !== 'empty') continue;
+            for (const [dx, dy] of STEPS) {
+                const nx = x + dx, ny = y + dy;
+                if (inBounds(nx, ny, w, h) && tailOf.has(ny * w + nx)) {
+                    const k = y * w + x;
+                    queue.push(k);
+                    inQueue[k] = 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    let head = 0;
+    while (head < queue.length) {
+        const key = queue[head++];
+        inQueue[key] = 0;
+        const x = key % w;
+        const y = (key - x) / w;
+        if (grid[y][x] !== 'empty') continue;
+
+        for (const [dx, dy] of STEPS) {
+            const nx = x + dx, ny = y + dy;
+            if (!inBounds(nx, ny, w, h)) continue;
+            const tk = ny * w + nx;
+            const idx = tailOf.get(tk);
+            if (idx === undefined) continue;
+            // Move the tail from the neighbour into this cell.
+            tailOf.delete(tk);
+            tailOf.set(key, idx);
+            grid[y][x] = 'occupied';
+            result[idx].path.push({ x, y });
+            // Expose any empty neighbours of the new tail to the queue.
+            for (const [ddx, ddy] of STEPS) {
+                const nnx = x + ddx, nny = y + ddy;
+                if (!inBounds(nnx, nny, w, h)) continue;
+                if (grid[nny][nnx] !== 'empty') continue;
+                const nk = nny * w + nnx;
+                if (inQueue[nk]) continue;
+                queue.push(nk);
+                inQueue[nk] = 1;
+            }
             break;
         }
     }
@@ -304,40 +391,78 @@ function absorbShortArrows(arrows: Arrow[], minLen: number): Arrow[] {
     return result;
 }
 
-// After the main generation loop, extend arrow tails to absorb any remaining
-// empty cells. The tail map is updated dynamically so a tail can "walk" through
-// a chain of adjacent empties in a single pass of the outer while loop.
-// Cells that are completely surrounded by non-tail occupied cells (rare) are
-// left alone — they cannot be absorbed without breaking path connectivity.
-function fillEmptyCells(arrows: Arrow[], grid: Grid, w: number, h: number): Arrow[] {
-    const result = arrows.map(a => ({ ...a, path: [...a.path] }));
+// Lay down a fresh arrow seeded at (sx, sy). Used by the rescue pass to fill
+// any remaining empty cells that fillEmptyCells couldn't reach (pockets
+// enclosed by arrow bodies with no tail neighbour). Skips the anti-clustering
+// and skip-and-absorb heuristics — by the time we get here we want the seed
+// to succeed if any exit direction exists.
+function placeRescueArrow(
+    grid: Grid,
+    id: number,
+    w: number,
+    h: number,
+    sx: number,
+    sy: number,
+    maxLen: number,
+): Arrow | null {
+    if (grid[sy][sx] !== 'empty') return null;
+    const possibleDirs = getExitDirs(grid, sx, sy, w, h);
+    if (possibleDirs.length === 0) return null;
+    const exitDir = possibleDirs[Math.floor(Math.random() * possibleDirs.length)];
 
-    let changed = true;
-    while (changed) {
-        changed = false;
+    grid[sy][sx] = 'occupied';
+    const path: GridPos[] = [{ x: sx, y: sy }];
+    let { x: stepX, y: stepY } = INWARD[exitDir];
+    let curX = sx, curY = sy;
 
-        // tail position key → index into result[]
-        const tailOf = new Map<number, number>();
-        for (let i = 0; i < result.length; i++) {
-            const t = result[i].path[result[i].path.length - 1];
-            tailOf.set(t.y * w + t.x, i);
-        }
+    for (let i = 0; i < maxLen - 1; i++) {
+        const neighbors = shuffle([
+            { x: curX - 1, y: curY },
+            { x: curX + 1, y: curY },
+            { x: curX, y: curY - 1 },
+            { x: curX, y: curY + 1 },
+        ]).filter(p => inBounds(p.x, p.y, w, h) && grid[p.y][p.x] === 'empty');
+        if (neighbors.length === 0) break;
+        const preferred = { x: curX + stepX, y: curY + stepY };
+        const hasPreferred = neighbors.some(p => p.x === preferred.x && p.y === preferred.y);
+        const next = hasPreferred ? preferred : neighbors[0];
+        stepX = next.x - curX;
+        stepY = next.y - curY;
+        curX = next.x;
+        curY = next.y;
+        grid[curY][curX] = 'occupied';
+        path.push({ x: curX, y: curY });
+    }
 
+    return { id, direction: exitDir, path, color: COLORS[id % COLORS.length] };
+}
+
+// Scan the grid and place rescue arrows at every remaining empty cell. The
+// rescue arrows may exit through other arrows' bodies — that's a valid puzzle
+// state, since the player must clear those obstructing arrows first. Iterates
+// until no more placements succeed, which guarantees no empty cells remain
+// when the placement is geometrically possible.
+function rescueEmptyRegions(
+    arrows: Arrow[],
+    grid: Grid,
+    w: number,
+    h: number,
+    maxLen: number,
+): Arrow[] {
+    const result = [...arrows];
+    let nextId = result.reduce((m, a) => Math.max(m, a.id), -1) + 1;
+
+    let placed = true;
+    while (placed) {
+        placed = false;
         for (let y = 0; y < h; y++) {
             for (let x = 0; x < w; x++) {
                 if (grid[y][x] !== 'empty') continue;
-                for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
-                    const nx = x + dx, ny = y + dy;
-                    if (!inBounds(nx, ny, w, h)) continue;
-                    const idx = tailOf.get(ny * w + nx);
-                    if (idx === undefined) continue;
-                    // Absorb: move the tail from the neighbour to this cell
-                    tailOf.delete(ny * w + nx);
-                    tailOf.set(y * w + x, idx);
-                    grid[y][x] = 'occupied';
-                    result[idx].path.push({ x, y });
-                    changed = true;
-                    break;
+                const arrow = placeRescueArrow(grid, nextId, w, h, x, y, maxLen);
+                if (arrow) {
+                    result.push(arrow);
+                    nextId++;
+                    placed = true;
                 }
             }
         }
@@ -361,7 +486,22 @@ export function generateLevel(
     // would exceed the cap (e.g. Floor Boss shortDim=91 → raw min=45 > max=30),
     // which inverts the random range and breaks the body-length calculation.
     const minLength = Math.min(Math.max(4, Math.floor(shortDimension * 0.5)), Math.max(4, maxLength - 4));
-    const MIN_ARROW_LEN = Math.max(3, Math.floor(shortDimension * 0.25));
+
+    // Arrow-quality threshold for the final absorb pass. Kept low (constant)
+    // because rescue arrows in tight pockets often have tails bordering other
+    // arrows' bodies, not tails — absorbShortArrows can't merge those, and
+    // a few short arrows on a huge board are a better outcome than the
+    // previous behaviour of leaving large regions empty.
+    const ABSORB_MIN = 3;
+
+    // Dead-pocket guard during the main placement loop. Was previously tied
+    // to `Math.floor(shortDimension * 0.25)`, which on Ludicrous/Iron Tangle
+    // grew so large (22–48 cells) that nearly every late placement was
+    // rejected for splitting off a "too-small" pocket; the loop spun and
+    // exited with thousands of cells empty. A constant of 3 is achievable in
+    // practice and the rescue pass handles the rest.
+    const DEAD_POCKET_MIN = 3;
+
     const changeDirChance = Math.max(0.1, 0.45 - (shortDimension * 0.007));
     // Radius of the "neighborhood" used for anti-clustering direction weighting.
     // Scales with grid size so a small board still sees a meaningful window.
@@ -376,29 +516,30 @@ export function generateLevel(
     spawnQueue = shuffle(spawnQueue);
     let queueIndex = 0;
 
-    const maxFails = width * height * 4; // Slightly increased threshold to account for random exploration 
-    
-    while (!allOccupied(grid, width, height) && consecutiveFails < maxFails) {
+    // Cached empty-cell counter — avoids an O(W*H) allOccupied scan per
+    // iteration on large grids. Decrement on accepted placement, restore on
+    // rollback.
+    let emptyCount = width * height;
+
+    const maxFails = width * height * 4;
+
+    while (emptyCount > 0 && consecutiveFails < maxFails) {
         if (queueIndex >= spawnQueue.length) {
             spawnQueue = shuffle(spawnQueue);
             queueIndex = 0;
         }
         const seedPos = spawnQueue[queueIndex++];
 
-        // CRITICAL CHANGE: We now pass the random seed point straight into the generator!
         const arrow = generateArrow(grid, id, width, height, minLength, maxLength, changeDirChance, seedPos, arrows, clusterRadius);
 
         if (arrow) {
-            const pockets = emptyPocketSizes(grid, width, height);
-            const createsDeadPocket = pockets.some(s => s > 0 && s < MIN_ARROW_LEN);
-
-            if (createsDeadPocket) {
+            if (hasDeadPocketNear(grid, arrow.path, DEAD_POCKET_MIN, width, height)) {
                 for (const p of arrow.path) grid[p.y][p.x] = 'empty';
                 consecutiveFails++;
                 continue;
             }
-
             arrows.push(arrow);
+            emptyCount -= arrow.path.length;
             id++;
             consecutiveFails = 0;
         } else {
@@ -406,12 +547,23 @@ export function generateLevel(
         }
     }
 
-    const absorbed = absorbShortArrows(arrows, MIN_ARROW_LEN);
-    const finalArrows = fillEmptyCells(absorbed, grid, width, height);
+    // Tail-walk fill: extend existing arrow tails into adjacent empty cells.
+    let result = fillEmptyCells(arrows, grid, width, height);
+
+    // Rescue: place fresh arrows in any remaining empty regions (those
+    // enclosed by arrow bodies with no tail neighbour).
+    result = rescueEmptyRegions(result, grid, width, height, maxLength);
+
+    // Run tail-walk fill again — rescue arrows expose new tails which may
+    // reach cells the first pass couldn't.
+    result = fillEmptyCells(result, grid, width, height);
+
+    // Merge any sub-ABSORB_MIN arrows whose endpoints touch another tail.
+    result = absorbShortArrows(result, ABSORB_MIN);
 
     return {
         width,
         height,
-        arrows: finalArrows.map((a, i) => ({ ...a, id: i, color: COLORS[i % COLORS.length] })),
+        arrows: result.map((a, i) => ({ ...a, id: i, color: COLORS[i % COLORS.length] })),
     };
 }

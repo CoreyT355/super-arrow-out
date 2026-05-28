@@ -1504,6 +1504,7 @@
 								{@const penalized = markedRed.has(arrow.id)}
 								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
 								<g onclick={() => handleClick(arrow.id)}
+								   onpointerup={(e) => { if (e.pointerType === 'pen' && !_didMove) handleClick(arrow.id); }}
 								   data-arrow-id={arrow.id}
 								   style="cursor:pointer" opacity={0.95}>
 									{#each arrow.path as seg}

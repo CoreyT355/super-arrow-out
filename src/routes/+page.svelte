@@ -244,9 +244,22 @@
 		return `${vbX} ${vbY} ${vbW} ${vbH}`;
 	});
 
+	// iPad Safari fires TouchEvents AND PointerEvents for Apple Pencil contacts.
+	// Pencil input is handled exclusively through the pointer-event path
+	// (onPenDown/Move/Up), so skip stylus touches here to avoid the same
+	// physical contact corrupting _activeT — without this, the pen's touch
+	// + pointer entries make _activeT.size jump to 2, triggering the pinch
+	// branch with an uninitialised _pinchD0 = 0 and zooming the board to max.
+	// touchType is a non-standard WebKit property: 'direct' = finger, 'stylus' = pen.
+	function isStylusTouch(t: Touch): boolean {
+		return (t as Touch & { touchType?: string }).touchType === 'stylus';
+	}
+
 	function onTouchStart(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches))
+		for (const t of Array.from(e.changedTouches)) {
+			if (isStylusTouch(t)) continue;
 			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
+		}
 
 		if (_activeT.size === 1) {
 			const [t] = _activeT.values();
@@ -261,8 +274,13 @@
 	}
 
 	function onTouchMove(e: TouchEvent) {
+		// Only preventDefault if there's a finger touch we're tracking — otherwise
+		// a stylus-only touchmove would block the browser's default behaviour for
+		// pen input (which the pointer handlers manage separately).
+		const fingerTouches = Array.from(e.changedTouches).filter(t => !isStylusTouch(t));
+		if (fingerTouches.length === 0) return;
 		e.preventDefault(); // must be non-passive to work; see panZoomAction
-		for (const t of Array.from(e.changedTouches))
+		for (const t of fingerTouches)
 			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
 
 		if (_activeT.size === 1) {
@@ -288,8 +306,10 @@
 	}
 
 	function onTouchEnd(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches))
+		for (const t of Array.from(e.changedTouches)) {
+			if (isStylusTouch(t)) continue;
 			_activeT.delete(t.identifier);
+		}
 
 		if (_activeT.size === 1) {
 			// Dropped to 1 finger — reset single-touch pan baseline

@@ -867,8 +867,11 @@
 			</button>
 		</div>
 
-		<!-- Centered content -->
-		<div class="flex-1 flex flex-col items-center justify-center gap-6" inert={menuSettingsOpen}>
+		<!-- Centered content — overflow-y-auto + my-auto keeps items centred when
+		     they fit and lets them scroll when they don't (e.g. many difficulty
+		     buttons on a short screen). -->
+		<div class="flex-1 flex flex-col items-center overflow-y-auto" inert={menuSettingsOpen}>
+			<div class="my-auto flex flex-col items-center gap-6 w-full py-4">
 			<div class="text-center">
 			<h1 class="text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight mb-2">Super Arrow Out</h1>
 			<!-- <p class="{darkMode ? 'text-slate-400' : 'text-slate-500'} text-lg">Click a snake to send it sliding — clear the board to win.</p> -->
@@ -944,7 +947,8 @@
 			{/each}
 		</div>
 
-		</div><!-- end centered content -->
+		</div><!-- end my-auto wrapper -->
+		</div><!-- end overflow-y-auto -->
 
 		<!-- Stats button pinned to the bottom -->
 		<div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen}>

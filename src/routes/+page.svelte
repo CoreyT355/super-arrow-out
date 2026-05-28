@@ -18,7 +18,7 @@
 		{ label: 'Ludicrous', cells: 16384, square: false, color: 'from-fuchsia-500 to-fuchsia-600', ring: 'ring-fuchsia-400', chartColor: '#d946ef', hidden: false,
 		  bgStyle: 'background:repeating-linear-gradient(0deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),repeating-linear-gradient(90deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),linear-gradient(135deg,#d946ef,#a21caf)' },
 		{ label: 'The Iron Tangle', cells: 32400, square: false, color: 'from-zinc-500 to-zinc-700', ring: 'ring-zinc-400', chartColor: '#71717a', hidden: false,
-		  bgStyle: 'background:url(/iron-tangle-bg.svg) repeat,linear-gradient(135deg,#52525b,#27272a)' },
+		  bgStyle: 'background:url(/iron-tangle-bg.svg) center/cover,linear-gradient(135deg,#52525b,#27272a)' },
 	];
 
 	const ENABLED_DIFFICULTIES = DIFFICULTIES.filter(d => !d.hidden);

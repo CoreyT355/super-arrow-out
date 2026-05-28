@@ -244,9 +244,22 @@
 		return `${vbX} ${vbY} ${vbW} ${vbH}`;
 	});
 
+	// iPad Safari fires TouchEvents AND PointerEvents for Apple Pencil contacts.
+	// Pencil input is handled exclusively through the pointer-event path
+	// (onPenDown/Move/Up below), so skip stylus touches here to avoid the
+	// same physical contact corrupting _activeT — without this, the pen's
+	// touch + pointer entries make _activeT.size jump to 2, triggering the
+	// pinch branch with _pinchD0 = 0 and zooming the board to max.
+	// touchType is a WebKit-specific property: 'direct' = finger, 'stylus' = pen.
+	function isStylusTouch(t: Touch): boolean {
+		return (t as Touch & { touchType?: string }).touchType === 'stylus';
+	}
+
 	function onTouchStart(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches))
+		for (const t of Array.from(e.changedTouches)) {
+			if (isStylusTouch(t)) continue;
 			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
+		}
 
 		if (_activeT.size === 1) {
 			const [t] = _activeT.values();
@@ -261,8 +274,12 @@
 	}
 
 	function onTouchMove(e: TouchEvent) {
+		// Skip stylus-only moves so we don't preventDefault on pen gestures
+		// the pointer-event path is handling.
+		const fingerTouches = Array.from(e.changedTouches).filter(t => !isStylusTouch(t));
+		if (fingerTouches.length === 0) return;
 		e.preventDefault(); // must be non-passive to work; see panZoomAction
-		for (const t of Array.from(e.changedTouches))
+		for (const t of fingerTouches)
 			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
 
 		if (_activeT.size === 1) {
@@ -288,8 +305,10 @@
 	}
 
 	function onTouchEnd(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches))
+		for (const t of Array.from(e.changedTouches)) {
+			if (isStylusTouch(t)) continue;
 			_activeT.delete(t.identifier);
+		}
 
 		if (_activeT.size === 1) {
 			// Dropped to 1 finger — reset single-touch pan baseline
@@ -324,20 +343,96 @@
 			scale = s; panX = c.x; panY = c.y;
 		}
 
-		node.addEventListener('touchstart',  onTouchStart, { passive: true  });
-		node.addEventListener('touchmove',   onTouchMove,  { passive: false }); // ← non-passive
-		node.addEventListener('touchend',    onTouchEnd,   { passive: true  });
-		node.addEventListener('touchcancel', onTouchEnd,   { passive: true  });
-		node.addEventListener('wheel',       onWheel,      { passive: false });
+		// ─── Apple Pencil (PointerEvent path) ──────────────────────────────
+		// Apple Pencil fires PointerEvents with pointerType='pen' that the
+		// touch handlers don't (and can't) see correctly. This block gives
+		// the pen its own pan + tap path. Listeners are attached via
+		// addEventListener (not Svelte event-attribute syntax) to avoid
+		// Svelte 5's event delegation, which conflicts with onclick when
+		// pointerup is also delegated on SVG elements.
+		const PEN_KEY = -1; // touch identifiers are always >= 0
+		const PEN_MOVE_THRESHOLD = 12; // px; lenient — pencil precision can
+		                               // trip the touch threshold (4) easily
+
+		// Maps a clientX/Y back to a grid cell using the current viewBox
+		// (mirrors the svgViewBox derived value). Returns null if outside
+		// the playfield. Coordinate-based hit-testing is more reliable
+		// than document.elementFromPoint for SVG content under transforms.
+		function cellAt(clientX: number, clientY: number): { x: number; y: number } | null {
+			const rect = node.getBoundingClientRect();
+			if (!containerW || !containerH) return null;
+			const vbW = (W + 0.2) / scale;
+			const vbH = (H + 0.2) / scale;
+			const vbX = -panX * vbW / containerW - 0.1;
+			const vbY = -panY * vbH / containerH - 0.1;
+			const svgX = vbX + ((clientX - rect.left) / containerW) * vbW;
+			const svgY = vbY + ((clientY - rect.top)  / containerH) * vbH;
+			const gx = Math.floor(svgX), gy = Math.floor(svgY);
+			if (gx < 0 || gy < 0 || gx >= W || gy >= H) return null;
+			return { x: gx, y: gy };
+		}
+
+		function onPenDown(e: PointerEvent) {
+			if (e.pointerType !== 'pen') return;
+			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
+			_t0 = { x: e.clientX, y: e.clientY };
+			_panX0 = panX; _panY0 = panY; _didMove = false;
+			try { node.setPointerCapture(e.pointerId); } catch { /* not supported */ }
+		}
+
+		function onPenMove(e: PointerEvent) {
+			if (e.pointerType !== 'pen' || !_activeT.has(PEN_KEY)) return;
+			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
+			const dx = e.clientX - _t0.x, dy = e.clientY - _t0.y;
+			if (Math.hypot(dx, dy) > PEN_MOVE_THRESHOLD) _didMove = true;
+			if (_didMove) {
+				e.preventDefault(); // suppress native scroll once we own the gesture
+				const c = clampPan(_panX0 + dx, _panY0 + dy, scale);
+				panX = c.x; panY = c.y;
+			}
+		}
+
+		function onPenUp(e: PointerEvent) {
+			if (e.pointerType !== 'pen' || !_activeT.has(PEN_KEY)) return;
+			_activeT.delete(PEN_KEY);
+			try { node.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+			if (_activeT.size === 0 && scale < 1.05) resetView();
+
+			if (e.type === 'pointerup' && !_didMove) {
+				const cell = cellAt(e.clientX, e.clientY);
+				if (!cell) return;
+				for (const arrow of level.arrows) {
+					if (removed.has(arrow.id)) continue;
+					if (arrow.path.some(p => p.x === cell.x && p.y === cell.y)) {
+						handleClick(arrow.id);
+						break;
+					}
+				}
+			}
+		}
+
+		node.addEventListener('touchstart',   onTouchStart, { passive: true  });
+		node.addEventListener('touchmove',    onTouchMove,  { passive: false }); // ← non-passive
+		node.addEventListener('touchend',     onTouchEnd,   { passive: true  });
+		node.addEventListener('touchcancel',  onTouchEnd,   { passive: true  });
+		node.addEventListener('wheel',        onWheel,      { passive: false });
+		node.addEventListener('pointerdown',  onPenDown, { passive: true  });
+		node.addEventListener('pointermove',  onPenMove, { passive: false }); // ← non-passive for preventDefault
+		node.addEventListener('pointerup',    onPenUp,   { passive: true  });
+		node.addEventListener('pointercancel', onPenUp,  { passive: true  });
 
 		return {
 			destroy() {
 				ro.disconnect();
-				node.removeEventListener('touchstart',  onTouchStart);
-				node.removeEventListener('touchmove',   onTouchMove);
-				node.removeEventListener('touchend',    onTouchEnd);
-				node.removeEventListener('touchcancel', onTouchEnd);
-				node.removeEventListener('wheel',       onWheel);
+				node.removeEventListener('touchstart',   onTouchStart);
+				node.removeEventListener('touchmove',    onTouchMove);
+				node.removeEventListener('touchend',     onTouchEnd);
+				node.removeEventListener('touchcancel',  onTouchEnd);
+				node.removeEventListener('wheel',        onWheel);
+				node.removeEventListener('pointerdown',  onPenDown);
+				node.removeEventListener('pointermove',  onPenMove);
+				node.removeEventListener('pointerup',    onPenUp);
+				node.removeEventListener('pointercancel', onPenUp);
 				_node = null;
 			}
 		};

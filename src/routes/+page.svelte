@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { generateLevel } from '$lib/utils/puzzleGenerator';
 	import { trapFocus } from '$lib/utils/trapFocus';
+	import { clampPan as clampPanPure, cellAt as cellAtPure } from '$lib/utils/gestures';
 	import type { Direction, GridPos, Arrow, Level } from '$lib/types';
 	import { fly } from 'svelte/transition';
 	import { tick } from 'svelte';
@@ -227,10 +228,7 @@
 
 	function clampPan(px: number, py: number, s: number) {
 		if (!_node) return { x: px, y: py };
-		return {
-			x: s <= 1 ? 0 : Math.min(0, Math.max(containerW * (1 - s), px)),
-			y: s <= 1 ? 0 : Math.min(0, Math.max(containerH * (1 - s), py)),
-		};
+		return clampPanPure(px, py, s, containerW, containerH);
 	}
 
 	function resetView() { scale = 1; panX = 0; panY = 0; }
@@ -354,22 +352,12 @@
 		const PEN_MOVE_THRESHOLD = 12; // px; lenient — pencil precision can
 		                               // trip the touch threshold (4) easily
 
-		// Maps a clientX/Y back to a grid cell using the current viewBox
-		// (mirrors the svgViewBox derived value). Returns null if outside
-		// the playfield. Coordinate-based hit-testing is more reliable
-		// than document.elementFromPoint for SVG content under transforms.
+		// Coordinate-based hit-testing is more reliable than
+		// document.elementFromPoint for SVG content under transforms.
+		// Pure logic lives in $lib/utils/gestures so it can be unit-tested.
 		function cellAt(clientX: number, clientY: number): { x: number; y: number } | null {
-			const rect = node.getBoundingClientRect();
-			if (!containerW || !containerH) return null;
-			const vbW = (W + 0.2) / scale;
-			const vbH = (H + 0.2) / scale;
-			const vbX = -panX * vbW / containerW - 0.1;
-			const vbY = -panY * vbH / containerH - 0.1;
-			const svgX = vbX + ((clientX - rect.left) / containerW) * vbW;
-			const svgY = vbY + ((clientY - rect.top)  / containerH) * vbH;
-			const gx = Math.floor(svgX), gy = Math.floor(svgY);
-			if (gx < 0 || gy < 0 || gx >= W || gy >= H) return null;
-			return { x: gx, y: gy };
+			return cellAtPure(clientX, clientY, node.getBoundingClientRect(),
+				containerW, containerH, panX, panY, scale, W, H);
 		}
 
 		function onPenDown(e: PointerEvent) {

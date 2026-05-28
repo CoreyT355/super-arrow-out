@@ -244,22 +244,9 @@
 		return `${vbX} ${vbY} ${vbW} ${vbH}`;
 	});
 
-	// iPad Safari fires TouchEvents AND PointerEvents for Apple Pencil contacts.
-	// Pencil input is handled exclusively through the pointer-event path
-	// (onPenDown/Move/Up), so skip stylus touches here to avoid the same
-	// physical contact corrupting _activeT — without this, the pen's touch
-	// + pointer entries make _activeT.size jump to 2, triggering the pinch
-	// branch with an uninitialised _pinchD0 = 0 and zooming the board to max.
-	// touchType is a non-standard WebKit property: 'direct' = finger, 'stylus' = pen.
-	function isStylusTouch(t: Touch): boolean {
-		return (t as Touch & { touchType?: string }).touchType === 'stylus';
-	}
-
 	function onTouchStart(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches)) {
-			if (isStylusTouch(t)) continue;
+		for (const t of Array.from(e.changedTouches))
 			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
-		}
 
 		if (_activeT.size === 1) {
 			const [t] = _activeT.values();
@@ -274,13 +261,8 @@
 	}
 
 	function onTouchMove(e: TouchEvent) {
-		// Only preventDefault if there's a finger touch we're tracking — otherwise
-		// a stylus-only touchmove would block the browser's default behaviour for
-		// pen input (which the pointer handlers manage separately).
-		const fingerTouches = Array.from(e.changedTouches).filter(t => !isStylusTouch(t));
-		if (fingerTouches.length === 0) return;
 		e.preventDefault(); // must be non-passive to work; see panZoomAction
-		for (const t of fingerTouches)
+		for (const t of Array.from(e.changedTouches))
 			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
 
 		if (_activeT.size === 1) {
@@ -306,10 +288,8 @@
 	}
 
 	function onTouchEnd(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches)) {
-			if (isStylusTouch(t)) continue;
+		for (const t of Array.from(e.changedTouches))
 			_activeT.delete(t.identifier);
-		}
 
 		if (_activeT.size === 1) {
 			// Dropped to 1 finger — reset single-touch pan baseline
@@ -344,62 +324,11 @@
 			scale = s; panX = c.x; panY = c.y;
 		}
 
-		// Apple Pencil fires PointerEvents (pointerType='pen') rather than
-		// TouchEvents, so the touch handlers above never see pencil input.
-		// These mirror the single-touch pan logic specifically for the pen.
-		// Touch identifiers are always >= 0, so -1 is a safe dedicated key.
-		const PEN_KEY = -1;
-
-		function onPenDown(e: PointerEvent) {
-			if (e.pointerType !== 'pen') return;
-			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
-			_t0 = { x: e.clientX, y: e.clientY };
-			_panX0 = panX; _panY0 = panY; _didMove = false;
-		}
-
-		function onPenMove(e: PointerEvent) {
-			if (e.pointerType !== 'pen' || !_activeT.has(PEN_KEY)) return;
-			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
-			const t = _activeT.get(PEN_KEY)!;
-			const dx = t.x - _t0.x, dy = t.y - _t0.y;
-			if (Math.hypot(dx, dy) > 4) _didMove = true;
-			if (_didMove) {
-				e.preventDefault(); // stop browser scroll during pen pan
-				const c = clampPan(_panX0 + dx, _panY0 + dy, scale);
-				panX = c.x; panY = c.y;
-			}
-		}
-
-		function onPenUp(e: PointerEvent) {
-			if (e.pointerType !== 'pen') return;
-			_activeT.delete(PEN_KEY);
-			if (_activeT.size === 0 && scale < 1.05) resetView();
-
-			// If the pen didn't pan, treat the lift as a tap and dispatch to the
-			// arrow under the pencil tip. We use elementFromPoint + data-arrow-id
-			// rather than individual onpointerup handlers on each <g> to avoid
-			// bubbling ambiguity and double-fires from synthesised click events.
-			if (!_didMove) {
-				let el = document.elementFromPoint(e.clientX, e.clientY) as Element | null;
-				while (el && !el.hasAttribute('data-arrow-id')) {
-					el = el.parentElement;
-				}
-				const rawId = el?.getAttribute('data-arrow-id');
-				if (rawId !== null && rawId !== undefined) {
-					handleClick(parseInt(rawId, 10));
-				}
-			}
-		}
-
 		node.addEventListener('touchstart',  onTouchStart, { passive: true  });
 		node.addEventListener('touchmove',   onTouchMove,  { passive: false }); // ← non-passive
 		node.addEventListener('touchend',    onTouchEnd,   { passive: true  });
 		node.addEventListener('touchcancel', onTouchEnd,   { passive: true  });
 		node.addEventListener('wheel',       onWheel,      { passive: false });
-		node.addEventListener('pointerdown',   onPenDown, { passive: true  });
-		node.addEventListener('pointermove',   onPenMove, { passive: false }); // ← non-passive for preventDefault
-		node.addEventListener('pointerup',     onPenUp,   { passive: true  });
-		node.addEventListener('pointercancel', onPenUp,   { passive: true  });
 
 		return {
 			destroy() {
@@ -409,10 +338,6 @@
 				node.removeEventListener('touchend',    onTouchEnd);
 				node.removeEventListener('touchcancel', onTouchEnd);
 				node.removeEventListener('wheel',       onWheel);
-				node.removeEventListener('pointerdown',   onPenDown);
-				node.removeEventListener('pointermove',   onPenMove);
-				node.removeEventListener('pointerup',     onPenUp);
-				node.removeEventListener('pointercancel', onPenUp);
 				_node = null;
 			}
 		};
@@ -1503,10 +1428,7 @@
 								{@const sd        = staticArrowData[arrow.id]}
 								{@const penalized = markedRed.has(arrow.id)}
 								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
-								<g onclick={() => handleClick(arrow.id)}
-								   onpointerup={(e) => { if (e.pointerType === 'pen' && !_didMove) handleClick(arrow.id); }}
-								   data-arrow-id={arrow.id}
-								   style="cursor:pointer" opacity={0.95}>
+								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer" opacity={0.95}>
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
 									{/each}

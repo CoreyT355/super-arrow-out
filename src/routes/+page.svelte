@@ -43,6 +43,7 @@
 	const PUZZLE_KEY    = 'arrow-out-puzzle';
 	const SETTINGS_KEY  = 'arrow-out-settings';
 	const STREAK_KEY    = 'arrow-out-streak';
+	const RESUME_KEY    = 'arrow-out-resume';
 
 	// Returns {} on server (SSR) or on parse error.
 	function loadProgress(): Record<string, number> {
@@ -103,9 +104,43 @@
 		localStorage.setItem(STREAK_KEY, JSON.stringify(s));
 	}
 
+	interface ResumeData {
+		removedIds:   number[];
+		markedRedIds: number[];
+		lives:        number;
+		difficulty:   string | null;
+		W:            number;
+		H:            number;
+		totalArrows:  number;
+	}
+
+	function saveResume(r: ResumeData) {
+		if (typeof window === 'undefined') return;
+		try { localStorage.setItem(RESUME_KEY, JSON.stringify(r)); } catch {}
+	}
+
+	function loadResume(): ResumeData | null {
+		if (typeof window === 'undefined') return null;
+		try {
+			const raw = localStorage.getItem(RESUME_KEY);
+			if (!raw) return null;
+			const r = JSON.parse(raw) as ResumeData;
+			// Sanity-check required fields so stale/corrupt data is silently dropped.
+			if (!Array.isArray(r.removedIds) || typeof r.lives !== 'number' || !r.W || !r.H)
+				return null;
+			return r;
+		} catch { return null; }
+	}
+
+	function clearResume() {
+		if (typeof window === 'undefined') return;
+		localStorage.removeItem(RESUME_KEY);
+	}
+
 	// Initialise from storage immediately on the client (guard keeps SSR safe).
-	let progress = $state<Record<string, number>>(loadProgress());
-	let streak   = $state(loadStreak());
+	let progress    = $state<Record<string, number>>(loadProgress());
+	let streak      = $state(loadStreak());
+	let resumeState = $state<ResumeData | null>(loadResume());
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
@@ -603,6 +638,7 @@
 		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
 		level             = await generateInWorker(w, h);
 		savePuzzle(level);
+		clearResume();
 		resetView();
 		showLoading = false;
 	}
@@ -617,6 +653,7 @@
 		lives       = MAX_LIVES;
 		winCounted  = false;
 		lostCounted = false;
+		clearResume();
 		if (reuse) {
 			level = loadPuzzle() ?? generateLevel(W, H);
 		} else {
@@ -699,6 +736,59 @@
 
 	const won  = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
 	const lost = $derived(lives <= 0 && !won);
+
+	// ─── resume-state persistence ─────────────────────────────────────────────────
+
+	// Auto-save in-progress state whenever arrows are removed. Clears on
+	// win/lose so a completed or dead game never shows as resumable.
+	$effect(() => {
+		if (gameState !== 'playing') return;
+		if (won || lost) {
+			clearResume();
+			resumeState = null;
+			return;
+		}
+		if (removed.size === 0) return; // no progress yet — nothing worth saving
+		const data: ResumeData = {
+			removedIds:   [...removed],
+			markedRedIds: [...markedRed],
+			lives,
+			difficulty:   currentDifficulty,
+			W,
+			H,
+			totalArrows:  level.arrows.length,
+		};
+		saveResume(data);
+		resumeState = data;
+	});
+
+	async function resumeGame() {
+		const r = resumeState ?? loadResume();
+		if (!r) return;
+		const savedLevel = loadPuzzle();
+		if (!savedLevel || savedLevel.width !== r.W || savedLevel.height !== r.H) {
+			// Saved puzzle doesn't match resume metadata — stale data, discard.
+			clearResume();
+			resumeState = null;
+			return;
+		}
+
+		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+		gameState = 'playing';
+		W = r.W; H = r.H;
+		currentDifficulty = r.difficulty;
+		winCounted  = false;
+		lostCounted = false;
+		menuOpen    = false;
+		level    = savedLevel;
+		removed  = new Set(r.removedIds);
+		markedRed = new Set(r.markedRedIds);
+		lives    = r.lives;
+		anims    = {};
+		resetView();
+	}
+
+	// ─── completion tracking ──────────────────────────────────────────────────────
 
 	// Record a completion when the player clears the board.
 	// winCounted is a plain bool (not reactive) so this fires exactly once per game.
@@ -783,6 +873,45 @@
 		</div>
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
+			{#if resumeState}
+				{@const remaining = resumeState.totalArrows - resumeState.removedIds.length}
+				<button
+					onclick={resumeGame}
+					class="flex items-center gap-4 py-4 px-5 rounded-2xl border-2 transition-all duration-150
+					       hover:scale-[1.02] active:scale-[0.98]
+					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
+					       {darkMode
+					           ? 'bg-emerald-950/60 border-emerald-700 hover:bg-emerald-900/70'
+					           : 'bg-emerald-50 border-emerald-400 hover:bg-emerald-100'}"
+				>
+					<!-- Play icon -->
+					<span class="shrink-0 flex items-center justify-center w-10 h-10 rounded-full
+					             {darkMode ? 'bg-emerald-700' : 'bg-emerald-500'}">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="white">
+							<polygon points="3,1 13,7 3,13"/>
+						</svg>
+					</span>
+					<div class="flex flex-col items-start flex-1 min-w-0">
+						<span class="font-bold text-base {darkMode ? 'text-emerald-300' : 'text-emerald-700'}">
+							Resume Puzzle
+						</span>
+						<span class="text-sm {darkMode ? 'text-emerald-500' : 'text-emerald-600'}">
+							{resumeState.difficulty ?? 'Custom'} · {remaining} arrow{remaining === 1 ? '' : 's'} left
+						</span>
+					</div>
+					<!-- Lives remaining -->
+					<div class="flex gap-0.5 shrink-0" aria-label="{resumeState.lives} lives remaining">
+						{#each Array(MAX_LIVES) as _, i}
+							<span class="text-base {i < resumeState.lives
+								? (darkMode ? 'text-red-400' : 'text-red-500')
+								: (darkMode ? 'text-slate-700' : 'text-slate-300')}">
+								{i < resumeState.lives ? '♥' : '♡'}
+							</span>
+						{/each}
+					</div>
+				</button>
+			{/if}
+
 			{#each ENABLED_DIFFICULTIES as d}
 				{@const count = progress[d.label] ?? 0}
 				<button

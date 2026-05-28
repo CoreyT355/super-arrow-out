@@ -17,6 +17,8 @@
 		{ label: 'Expert',     cells:  4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48', hidden: false },
 		{ label: 'Ludicrous', cells: 16384, square: false, color: 'from-fuchsia-500 to-fuchsia-600', ring: 'ring-fuchsia-400', chartColor: '#d946ef', hidden: false,
 		  bgStyle: 'background:repeating-linear-gradient(0deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),repeating-linear-gradient(90deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),linear-gradient(135deg,#d946ef,#a21caf)' },
+		{ label: 'The Iron Tangle', cells: 65536, square: false, color: 'from-zinc-500 to-zinc-700', ring: 'ring-zinc-400', chartColor: '#71717a', hidden: false,
+		  bgStyle: 'background:repeating-linear-gradient(45deg,transparent 0px,transparent 5px,rgba(255,255,255,0.07) 5px,rgba(255,255,255,0.07) 6px),repeating-linear-gradient(-45deg,transparent 0px,transparent 5px,rgba(255,255,255,0.07) 5px,rgba(255,255,255,0.07) 6px),linear-gradient(135deg,#52525b,#27272a)' },
 	];
 
 	const ENABLED_DIFFICULTIES = DIFFICULTIES.filter(d => !d.hidden);

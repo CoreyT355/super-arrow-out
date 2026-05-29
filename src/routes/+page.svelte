@@ -5,43 +5,26 @@
 	import type { Direction, GridPos, Arrow, Level } from '$lib/types';
 	import { fly } from 'svelte/transition';
 	import { tick } from 'svelte';
-	import GeneratorWorker from '$lib/workers/puzzleGenerator.worker?worker';
+	import { generateInWorker } from '$lib/workers/workerBridge';
 	import { settings } from '$lib/stores/settings.svelte';
 	import { progress as progressStore } from '$lib/stores/progress.svelte';
 	import { resume as resumeStore, type ResumeData } from '$lib/stores/resume.svelte';
+	import { DIFFICULTIES, ENABLED_DIFFICULTIES, computeGridSize, gridCaption } from '$lib/config/difficulties';
+	import {
+		MS_PER_STEP,
+		NUDGE_FWD,
+		NUDGE_BACK,
+		FLASH_HALF,
+		EXIT_DURATION,
+		EXIT_MIN_DUR,
+		VORTEX_DURATION,
+		VORTEX_FADE_MS,
+		VORTEX_SPIN_MS,
+	} from '$lib/constants/timing';
+	import { COLORS_DARK, COLORS_LIGHT, DIR_ROT, DELTA } from '$lib/constants/theme';
 
-	// ─── difficulty config ───────────────────────────────────────────────────────
-
-	// cells: target cell count for adaptive grids; square: always use equal W/H
-	const DIFFICULTIES = [
-		{ label: 'Easy',       cells:    36, square: true,  color: 'from-emerald-500 to-emerald-600', ring: 'ring-emerald-400', chartColor: '#10b981', hidden: false },
-		{ label: 'Normal',     cells:    81, square: true,  color: 'from-sky-500 to-sky-600',         ring: 'ring-sky-400',     chartColor: '#0ea5e9', hidden: false },
-		{ label: 'Hard',       cells:   256, square: false, color: 'from-violet-500 to-violet-600',   ring: 'ring-violet-400',  chartColor: '#8b5cf6', hidden: false },
-		{ label: 'Super Hard', cells:  1024, square: false, color: 'from-orange-500 to-orange-600',   ring: 'ring-orange-400',  chartColor: '#f97316', hidden: false },
-		{ label: 'Expert',     cells:  4096, square: false, color: 'from-rose-600 to-rose-700',       ring: 'ring-rose-400',    chartColor: '#e11d48', hidden: false },
-		{ label: 'Ludicrous', cells: 16384, square: false, color: 'from-fuchsia-500 to-fuchsia-600', ring: 'ring-fuchsia-400', chartColor: '#d946ef', hidden: false,
-		  bgStyle: 'background:repeating-linear-gradient(0deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),repeating-linear-gradient(90deg,transparent 0px,transparent 7px,rgba(255,255,255,0.18) 7px,rgba(255,255,255,0.18) 9px,transparent 9px,transparent 19px,rgba(255,255,255,0.28) 19px,rgba(255,255,255,0.28) 21px),linear-gradient(135deg,#d946ef,#a21caf)' },
-		{ label: 'The Iron Tangle', cells: 32400, square: false, color: 'from-zinc-500 to-zinc-700', ring: 'ring-zinc-400', chartColor: '#71717a', hidden: true,
-		  bgStyle: 'background:linear-gradient(rgba(0,0,0,0.25),rgba(0,0,0,0.25)),url(/iron-tangle-bg.svg) center/cover,linear-gradient(135deg,#52525b,#27272a);text-shadow:0 1px 3px rgba(0,0,0,0.7)' },
-	];
-
-	const ENABLED_DIFFICULTIES = DIFFICULTIES.filter(d => !d.hidden);
-
-	// Compute W × H for a difficulty, fitting the current viewport aspect ratio.
-	function computeGridSize(cells: number, square: boolean): { w: number; h: number } {
-		const s = Math.round(Math.sqrt(cells));
-		if (square || typeof window === 'undefined') return { w: s, h: s };
-		// Available play area (rough estimate: 80px for button row + padding)
-		const ratio = Math.max(0.4, Math.min(2.5, window.innerWidth / (window.innerHeight - 80)));
-		const w = Math.max(4, Math.round(Math.sqrt(cells * ratio)));
-		const h = Math.max(4, Math.round(Math.sqrt(cells / ratio)));
-		return { w, h };
-	}
-
-	function gridCaption(cells: number, square: boolean): string {
-		const { w, h } = computeGridSize(cells, square);
-		return `${w} × ${h} grid`;
-	}
+	// Difficulty config, timing constants, and theme palettes live in
+	// $lib/config and $lib/constants. See top-of-file imports.
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
@@ -49,24 +32,6 @@
 	let menuOpen = $state(false);
 	let W = $state(9);
 	let H = $state(9);
-
-	// Timing constants
-	const MS_PER_STEP   = 90;
-	const NUDGE_FWD     = 140; // ms to nudge toward blocker
-	const NUDGE_BACK    = 140; // ms to spring back
-	const FLASH_HALF    = 90;  // ms per flash half (×4 = total flash duration)
-	const EXIT_DURATION  = 450; // ms — constant drain duration regardless of snake length
-	const EXIT_MIN_DUR   = 220; // ms — floor so a 1-cell snake at the edge isn't instant
-	const VORTEX_DURATION = 2000; // ms — win collapse animation (fade-in + spiral)
-	const VORTEX_FADE_MS  =  600; // ms — stars fade in from nothing during this phase
-	const VORTEX_SPIN_MS  = VORTEX_DURATION - VORTEX_FADE_MS; // 1400ms — spiral with ease-in
-
-	const DIR_ROT: Record<Direction, number> = { E: 0, S: 90, W: 180, N: 270 };
-
-	const DELTA: Record<Direction, { dx: number; dy: number }> = {
-		N: { dx: 0, dy: -1 }, S: { dx: 0, dy: 1 },
-		E: { dx: 1,  dy: 0 }, W: { dx: -1, dy: 0 },
-	};
 
 	type Phase = 'exiting' | 'blocked-fwd' | 'blocked-back' | 'blocked-flash';
 
@@ -611,17 +576,7 @@
 	}
 
 	// ─── game control ────────────────────────────────────────────────────────────
-
-	function generateInWorker(w: number, h: number): Promise<Level> {
-		return new Promise((resolve) => {
-			const worker = new GeneratorWorker();
-			worker.onmessage = (e: MessageEvent<Level>) => {
-				resolve(e.data);
-				worker.terminate();
-			};
-			worker.postMessage({ w, h });
-		});
-	}
+	// `generateInWorker` lives in $lib/workers/workerBridge.
 
 	async function startGame(cells: number, square: boolean) {
 		if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
@@ -740,11 +695,7 @@
 	// $effect needed.
 
 	// ─── theme-aware arrow colors ────────────────────────────────────────────────
-
-	// Dark palette: bright pastels readable on dark backgrounds.
-	// Light palette: saturated -600/-700 variants readable on light backgrounds.
-	const COLORS_DARK  = ['#f87171','#60a5fa','#4ade80','#c084fc','#fb923c','#f472b6','#facc15','#2dd4bf','#22d3ee','#a3e635'];
-	const COLORS_LIGHT = ['#dc2626','#2563eb','#16a34a','#9333ea','#ea580c','#db2777','#a16207','#0d9488','#0891b2','#65a30d'];
+	// COLORS_DARK / COLORS_LIGHT live in $lib/constants/theme.
 
 	function themeColor(id: number): string {
 		return (darkMode ? COLORS_DARK : COLORS_LIGHT)[id % 10];

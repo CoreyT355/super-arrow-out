@@ -1628,7 +1628,7 @@
 								{@const sd        = staticArrowData[arrow.id]}
 								{@const penalized = markedRed.has(arrow.id)}
 								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
-								<g onclick={() => handleClick(arrow.id)} style="cursor:pointer" opacity={0.95}>
+								<g data-testid="arrow" data-arrow-id={arrow.id} onclick={() => handleClick(arrow.id)} style="cursor:pointer" opacity={0.95}>
 									{#each arrow.path as seg}
 										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
 									{/each}

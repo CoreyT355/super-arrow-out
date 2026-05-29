@@ -398,8 +398,17 @@
 			if (Math.abs(dx1 * dy2 - dy1 * dx2) < 0.001 * len1 * len2) {
 				d += ` L ${bx} ${by}`; // straight — pass through
 			} else {
-				const r1 = Math.min(r, len1 / 2);
-				const r2 = Math.min(r, len2 / 2);
+				// Emit a quadratic Bézier even when "rounded corners" is off.
+				// A true sharp corner (a plain `L bx by`) creates zero-thickness
+				// extreme points at the inner L-corner and outer miter spike —
+				// browsers anti-alias those as a visible "pinch" where the
+				// straight segments meet, especially at thin strokes on mobile.
+				// A tiny radius (effR = STROKE_WIDTH / 2 when r is 0) smooths
+				// the stroke geometry just enough to read as uniformly thick,
+				// while still looking visually sharp at every grid scale.
+				const effR = r === 0 ? 0.03 : r;
+				const r1 = Math.min(effR, len1 / 2);
+				const r2 = Math.min(effR, len2 / 2);
 				const p1x = bx - (dx1 / len1) * r1, p1y = by - (dy1 / len1) * r1;
 				const p2x = bx + (dx2 / len2) * r2, p2y = by + (dy2 / len2) * r2;
 				d += ` L ${p1x} ${p1y} Q ${bx} ${by} ${p2x} ${p2y}`;
@@ -1495,7 +1504,7 @@
 											stroke={color}
 											stroke-width={0.14}
 											stroke-linecap="round"
-											stroke-linejoin="round"
+											stroke-linejoin={roundedCorners ? 'round' : 'miter'}
 											stroke-dasharray="{anim.L_snake} {anim.L_total}"
 											stroke-dashoffset={offset}
 										/>
@@ -1521,7 +1530,7 @@
 											stroke={red ? '#ef4444' : color}
 											stroke-width={0.14}
 											stroke-linecap="round"
-											stroke-linejoin="round"
+											stroke-linejoin={roundedCorners ? 'round' : 'miter'}
 										/>
 										<polygon
 											points="0.32,0 -0.16,-0.24 -0.16,0.24"
@@ -1545,7 +1554,7 @@
 										stroke={drawColor}
 										stroke-width={0.14}
 										stroke-linecap="round"
-										stroke-linejoin="round"
+										stroke-linejoin={roundedCorners ? 'round' : 'miter'}
 									/>
 									<polygon
 										points="0.32,0 -0.16,-0.24 -0.16,0.24"

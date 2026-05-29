@@ -1,6 +1,8 @@
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+// `defineConfig` from `vitest/config` is the same shape as Vite's plus the
+// `test` key — using the Vite one rejects `test` at type-check time.
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
     plugins: [tailwindcss(), sveltekit()],

@@ -489,6 +489,13 @@
 			// Cross product detects a direction change (turn vs straight)
 			if (Math.abs(dx1 * dy2 - dy1 * dx2) < 0.001 * len1 * len2) {
 				d += ` L ${bx} ${by}`; // straight — pass through
+			} else if (r === 0) {
+				// Sharp corner. Emitting `L bx by Q bx by bx by` (a zero-radius
+				// quadratic Bézier whose control point and both endpoints sit
+				// at the same point) tickles a Safari/WebKit rendering bug at
+				// 90° joins — strokes visibly thicken and thin around the
+				// degenerate curve. Emit a plain `L` for sharp corners instead.
+				d += ` L ${bx} ${by}`;
 			} else {
 				const r1 = Math.min(r, len1 / 2);
 				const r2 = Math.min(r, len2 / 2);

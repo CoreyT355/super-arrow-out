@@ -6,6 +6,9 @@
 	import { fly } from 'svelte/transition';
 	import { tick } from 'svelte';
 	import GeneratorWorker from '$lib/workers/puzzleGenerator.worker?worker';
+	import { settings } from '$lib/stores/settings.svelte';
+	import { progress as progressStore } from '$lib/stores/progress.svelte';
+	import { resume as resumeStore, type ResumeData } from '$lib/stores/resume.svelte';
 
 	// ─── difficulty config ───────────────────────────────────────────────────────
 
@@ -39,111 +42,6 @@
 		const { w, h } = computeGridSize(cells, square);
 		return `${w} × ${h} grid`;
 	}
-
-	// ─── local-storage helpers ──────────────────────────────────────────────────
-
-	const STORAGE_KEY   = 'arrow-out-progress';
-	const PUZZLE_KEY    = 'arrow-out-puzzle';
-	const SETTINGS_KEY  = 'arrow-out-settings';
-	const STREAK_KEY    = 'arrow-out-streak';
-	const RESUME_KEY    = 'arrow-out-resume';
-
-	// Returns {} on server (SSR) or on parse error.
-	function loadProgress(): Record<string, number> {
-		if (typeof window === 'undefined') return {};
-		try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}'); }
-		catch { return {}; }
-	}
-
-	function saveProgress(p: Record<string, number>) {
-		if (typeof window === 'undefined') return;
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
-	}
-
-	// Persist the current puzzle so "Try Again" can restore the exact same layout.
-	function savePuzzle(lvl: typeof level) {
-		if (typeof window === 'undefined') return;
-		try { localStorage.setItem(PUZZLE_KEY, JSON.stringify(lvl)); } catch {}
-	}
-
-	function loadPuzzle(): typeof level | null {
-		if (typeof window === 'undefined') return null;
-		try {
-			const raw = localStorage.getItem(PUZZLE_KEY);
-			return raw ? JSON.parse(raw) : null;
-		} catch { return null; }
-	}
-
-	function loadSettings(): { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean } {
-		if (typeof window === 'undefined') return { showGrid: true, roundedCorners: true, darkMode: true, winAnimation: true };
-		try {
-			const raw = localStorage.getItem(SETTINGS_KEY);
-			const parsed = raw ? JSON.parse(raw) : {};
-			return {
-				showGrid:       parsed.showGrid       ?? true,
-				roundedCorners: parsed.roundedCorners ?? true,
-				darkMode:       parsed.darkMode       ?? true,
-				winAnimation:   parsed.winAnimation   ?? true,
-			};
-		} catch { return { showGrid: true, roundedCorners: true, darkMode: true, winAnimation: true }; }
-	}
-
-	function saveSettings(s: { showGrid: boolean; roundedCorners: boolean; darkMode: boolean; winAnimation: boolean }) {
-		if (typeof window === 'undefined') return;
-		localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-	}
-
-	function loadStreak(): { current: number; best: number } {
-		if (typeof window === 'undefined') return { current: 0, best: 0 };
-		try {
-			const raw = localStorage.getItem(STREAK_KEY);
-			const parsed = raw ? JSON.parse(raw) : {};
-			return { current: parsed.current ?? 0, best: parsed.best ?? 0 };
-		} catch { return { current: 0, best: 0 }; }
-	}
-
-	function saveStreak(s: { current: number; best: number }) {
-		if (typeof window === 'undefined') return;
-		localStorage.setItem(STREAK_KEY, JSON.stringify(s));
-	}
-
-	interface ResumeData {
-		removedIds:   number[];
-		markedRedIds: number[];
-		lives:        number;
-		difficulty:   string | null;
-		W:            number;
-		H:            number;
-		totalArrows:  number;
-	}
-
-	function saveResume(r: ResumeData) {
-		if (typeof window === 'undefined') return;
-		try { localStorage.setItem(RESUME_KEY, JSON.stringify(r)); } catch {}
-	}
-
-	function loadResume(): ResumeData | null {
-		if (typeof window === 'undefined') return null;
-		try {
-			const raw = localStorage.getItem(RESUME_KEY);
-			if (!raw) return null;
-			const r = JSON.parse(raw) as ResumeData;
-			// Sanity-check required fields so stale/corrupt data is silently dropped.
-			if (!Array.isArray(r.removedIds) || typeof r.lives !== 'number' || !r.W || !r.H)
-				return null;
-			return r;
-		} catch { return null; }
-	}
-
-	function clearResume() {
-		if (typeof window === 'undefined') return;
-		localStorage.removeItem(RESUME_KEY);
-	}
-
-	// Initialise from storage immediately on the client (guard keeps SSR safe).
-	let progress    = $state<Record<string, number>>(loadProgress());
-	let streak      = $state(loadStreak());
-	let resumeState = $state<ResumeData | null>(loadResume());
 
 	// ─── game state ──────────────────────────────────────────────────────────────
 
@@ -197,16 +95,26 @@
 	let lostCounted       = false; // same pattern — reset on new game
 	let rafId: number | null = null;
 
-	// Settings — loaded eagerly so derived values that read them (e.g. vortexDone)
-	// can be declared anywhere in this script. Persistence effect lives further down.
-	const _settings    = loadSettings();
-	let showGrid       = $state(_settings.showGrid);
-	let roundedCorners = $state(_settings.roundedCorners);
-	let darkMode       = $state(_settings.darkMode);
-	let winAnimation   = $state(_settings.winAnimation);
+	// Settings are owned by the settings store; these $derived aliases keep
+	// the rest of this file readable (template references still say
+	// `darkMode` etc. rather than `settings.darkMode`). Writes go through the
+	// store directly: `settings.darkMode = !settings.darkMode`.
+	const showGrid       = $derived(settings.showGrid);
+	const roundedCorners = $derived(settings.roundedCorners);
+	const darkMode       = $derived(settings.darkMode);
+	const winAnimation   = $derived(settings.winAnimation);
+
+	// Per-screen view state that ISN'T persisted.
 	let showLoading    = $state(false);
 	let regenerating   = $state(false);
 	let menuSettingsOpen = $state(false);
+
+	// Read-only aliases over the progress / resume stores. Same pattern: keep
+	// the call sites looking like the originals; route writes through the
+	// store (e.g. `progressStore.wins = next`, `resumeStore.data = data`).
+	const progress    = $derived(progressStore.wins);
+	const streak      = $derived(progressStore.streak);
+	const resumeState = $derived(resumeStore.data);
 
 	// OS-level reduce-motion preference. Reactive — picks up live changes from
 	// System Settings without a reload. Gates the vortex, blocked-nudge, and
@@ -723,8 +631,8 @@
 		lostCounted       = false;
 		currentDifficulty = DIFFICULTIES.find(d => d.cells === cells && d.square === square)?.label ?? null;
 		level             = await generateInWorker(w, h);
-		savePuzzle(level);
-		clearResume();
+		resumeStore.puzzle = level;
+		resumeStore.clear();
 		resetView();
 		showLoading = false;
 	}
@@ -739,12 +647,12 @@
 		lives       = MAX_LIVES;
 		winCounted  = false;
 		lostCounted = false;
-		clearResume();
+		resumeStore.clear();
 		if (reuse) {
-			level = loadPuzzle() ?? generateLevel(W, H);
+			level = resumeStore.puzzle ?? generateLevel(W, H);
 		} else {
 			level = generateLevel(W, H);
-			savePuzzle(level);
+			resumeStore.puzzle = level;
 		}
 		resetView();
 	}
@@ -765,7 +673,7 @@
 		showLoading  = true;
 		await tick();
 		level = await generateInWorker(W, H);
-		savePuzzle(level);
+		resumeStore.puzzle = level;
 		resetView();
 		showLoading  = false;
 		regenerating = false;
@@ -819,7 +727,8 @@
 		return `Win breakdown: ${totalWins} total. ${parts}`;
 	});
 
-	$effect(() => { saveSettings({ showGrid, roundedCorners, darkMode, winAnimation }); });
+	// Settings auto-persist via the settings store's root effect; no in-page
+	// $effect needed.
 
 	// ─── theme-aware arrow colors ────────────────────────────────────────────────
 
@@ -848,16 +757,17 @@
 	// ─── resume-state persistence ─────────────────────────────────────────────────
 
 	// Auto-save in-progress state whenever arrows are removed. Clears on
-	// win/lose so a completed or dead game never shows as resumable.
+	// win/lose so a completed or dead game never shows as resumable. The
+	// localStorage write itself is owned by the resume store's root effect;
+	// here we just mutate the reactive snapshot.
 	$effect(() => {
 		if (gameState !== 'playing') return;
 		if (won || lost) {
-			clearResume();
-			resumeState = null;
+			resumeStore.clear();
 			return;
 		}
 		if (removed.size === 0) return; // no progress yet — nothing worth saving
-		const data: ResumeData = {
+		resumeStore.data = {
 			removedIds:   [...removed],
 			markedRedIds: [...markedRed],
 			lives,
@@ -866,18 +776,15 @@
 			H,
 			totalArrows:  level.arrows.length,
 		};
-		saveResume(data);
-		resumeState = data;
 	});
 
 	async function resumeGame() {
-		const r = resumeState ?? loadResume();
+		const r = resumeStore.data;
 		if (!r) return;
-		const savedLevel = loadPuzzle();
+		const savedLevel = resumeStore.puzzle;
 		if (!savedLevel || savedLevel.width !== r.W || savedLevel.height !== r.H) {
 			// Saved puzzle doesn't match resume metadata — stale data, discard.
-			clearResume();
-			resumeState = null;
+			resumeStore.clear();
 			return;
 		}
 
@@ -903,13 +810,15 @@
 	$effect(() => {
 		if (won && !winCounted && currentDifficulty !== null) {
 			winCounted = true;
-			const next = { ...progress, [currentDifficulty]: (progress[currentDifficulty] ?? 0) + 1 };
-			progress = next;
-			saveProgress(next);
-			// Advance win streak
-			const nextStreak = { current: streak.current + 1, best: Math.max(streak.best, streak.current + 1) };
-			streak = nextStreak;
-			saveStreak(nextStreak);
+			progressStore.wins = {
+				...progress,
+				[currentDifficulty]: (progress[currentDifficulty] ?? 0) + 1,
+			};
+			// Advance win streak; the store auto-persists the new snapshot.
+			progressStore.streak = {
+				current: streak.current + 1,
+				best:    Math.max(streak.best, streak.current + 1),
+			};
 		}
 	});
 
@@ -917,9 +826,7 @@
 	$effect(() => {
 		if (lost && !lostCounted) {
 			lostCounted = true;
-			const nextStreak = { current: 0, best: streak.best };
-			streak = nextStreak;
-			saveStreak(nextStreak);
+			progressStore.streak = { current: 0, best: streak.best };
 		}
 	});
 
@@ -1112,7 +1019,7 @@
 				<!-- Dark Mode -->
 				<button
 					role="switch" aria-checked={darkMode}
-					onclick={() => (darkMode = !darkMode)}
+					onclick={() => (settings.darkMode = !settings.darkMode)}
 					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>
@@ -1143,7 +1050,7 @@
 				<!-- Show Grid -->
 				<button
 					role="switch" aria-checked={showGrid}
-					onclick={() => (showGrid = !showGrid)}
+					onclick={() => (settings.showGrid = !settings.showGrid)}
 					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>
@@ -1159,7 +1066,7 @@
 				<!-- Rounded Corners -->
 				<button
 					role="switch" aria-checked={roundedCorners}
-					onclick={() => (roundedCorners = !roundedCorners)}
+					onclick={() => (settings.roundedCorners = !settings.roundedCorners)}
 					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>
@@ -1175,7 +1082,7 @@
 				<!-- Win Animation -->
 				<button
 					role="switch" aria-checked={winAnimation}
-					onclick={() => (winAnimation = !winAnimation)}
+					onclick={() => (settings.winAnimation = !settings.winAnimation)}
 					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>
@@ -1439,7 +1346,7 @@
 				<!-- Toggle: Dark Mode -->
 				<button
 					role="switch" aria-checked={darkMode}
-					onclick={() => (darkMode = !darkMode)}
+					onclick={() => (settings.darkMode = !settings.darkMode)}
 					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>
@@ -1477,7 +1384,7 @@
 				<!-- Toggle: Show Grid -->
 				<button
 					role="switch" aria-checked={showGrid}
-					onclick={() => (showGrid = !showGrid)}
+					onclick={() => (settings.showGrid = !settings.showGrid)}
 					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>
@@ -1494,7 +1401,7 @@
 				<!-- Toggle: Rounded Corners -->
 				<button
 					role="switch" aria-checked={roundedCorners}
-					onclick={() => (roundedCorners = !roundedCorners)}
+					onclick={() => (settings.roundedCorners = !settings.roundedCorners)}
 					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>
@@ -1511,7 +1418,7 @@
 				<!-- Toggle: Win Animation -->
 				<button
 					role="switch" aria-checked={winAnimation}
-					onclick={() => (winAnimation = !winAnimation)}
+					onclick={() => (settings.winAnimation = !settings.winAnimation)}
 					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
 					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
 				>

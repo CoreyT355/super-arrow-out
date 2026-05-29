@@ -1595,7 +1595,7 @@
 											stroke={color}
 											stroke-width={0.14}
 											stroke-linecap="round"
-											stroke-linejoin="round"
+											stroke-linejoin={roundedCorners ? 'round' : 'bevel'}
 											stroke-dasharray="{anim.L_snake} {anim.L_total}"
 											stroke-dashoffset={offset}
 										/>
@@ -1621,7 +1621,7 @@
 											stroke={red ? '#ef4444' : color}
 											stroke-width={0.14}
 											stroke-linecap="round"
-											stroke-linejoin="round"
+											stroke-linejoin={roundedCorners ? 'round' : 'bevel'}
 										/>
 										<polygon
 											points="0.32,0 -0.16,-0.24 -0.16,0.24"
@@ -1645,7 +1645,7 @@
 										stroke={drawColor}
 										stroke-width={0.14}
 										stroke-linecap="round"
-										stroke-linejoin="round"
+										stroke-linejoin={roundedCorners ? 'round' : 'bevel'}
 									/>
 									<polygon
 										points="0.32,0 -0.16,-0.24 -0.16,0.24"

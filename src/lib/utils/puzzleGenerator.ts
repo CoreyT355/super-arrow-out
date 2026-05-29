@@ -464,32 +464,48 @@ function absorbShortArrows(arrows: Arrow[], minLen: number): Arrow[] {
         // from hoarding all of the merged blocks.
         const indices = shuffle(Array.from({ length: result.length }, (_, idx) => idx));
 
+        // We try four merge patterns. Tail-side merges (1 & 2) preserve the
+        // existing arrow's head and direction. Head-side merges (3 & 4)
+        // prepend the short arrow, making its endpoint the new head — the
+        // direction will be re-synced by alignDirectionsWithGeometry at the
+        // end of generateLevel. Adding head-side merges roughly doubles the
+        // chance of finding a mergeable neighbour, which is what keeps tiny
+        // pockets (1-cell or 2-cell) from escaping as head-only arrows.
         let merged = false;
         for (const i of indices) {
             if (i === badIdx || i >= result.length) continue;
             const other = result[i];
-            const tail = other.path[other.path.length - 1];
+            const otherHead = other.path[0];
+            const otherTail = other.path[other.path.length - 1];
 
-            let extension: GridPos[] | null = null;
-            if (isAdjacent(tail, badHead)) {
-                extension = bad.path;
-            } else if (isAdjacent(tail, badTail)) {
-                extension = [...bad.path].reverse();
+            // (1) bad's head touches other's tail → append bad as-is.
+            // (2) bad's tail touches other's tail → append bad reversed.
+            // (3) bad's tail touches other's head → prepend bad as-is.
+            // (4) bad's head touches other's head → prepend bad reversed.
+            let newPath: GridPos[] | null = null;
+            if (isAdjacent(otherTail, badHead)) {
+                newPath = [...other.path, ...bad.path];
+            } else if (isAdjacent(otherTail, badTail)) {
+                newPath = [...other.path, ...[...bad.path].reverse()];
+            } else if (isAdjacent(otherHead, badTail)) {
+                newPath = [...bad.path, ...other.path];
+            } else if (isAdjacent(otherHead, badHead)) {
+                newPath = [...[...bad.path].reverse(), ...other.path];
             }
 
-            if (!extension) continue;
+            if (!newPath) continue;
 
-            result[i] = { ...other, path: [...other.path, ...extension] };
+            result[i] = { ...other, path: newPath };
             result.splice(badIdx, 1);
             changed = true;
             merged = true;
             break;
         }
 
-        // The bad arrow has no mergeable neighbor (its endpoints don't sit
-        // next to any other arrow's tail). Stop the loop instead of spinning;
-        // a short arrow is a much better outcome than the previous behavior
-        // of leaving the cells empty entirely.
+        // The bad arrow has no mergeable neighbour at all (its endpoints
+        // don't touch any other arrow's endpoint). Stop the loop instead of
+        // spinning; a short arrow is a much better outcome than an
+        // uncovered cell.
         if (!merged) break;
     }
 
@@ -584,6 +600,17 @@ function fillEmptyCells(arrows: Arrow[], grid: Grid, w: number, h: number): Arro
 // skip rules. We're at the bottom of the cleanup pipeline now: anything
 // still empty MUST get covered. Pick any valid exit, lay down the head,
 // grow up to maxLen cells, and ship it.
+// Map "first body step direction" -> arrow exit direction.
+// The body grows opposite the exit: a body step going north (dy = -1) means
+// the head exits south. Used by the final alignment pass to derive each
+// arrow's `direction` from its body geometry.
+function exitForStep(dx: number, dy: number): Direction {
+    if (dx === 1)  return 'W';
+    if (dx === -1) return 'E';
+    if (dy === 1)  return 'N';
+    return 'S'; // dy === -1
+}
+
 function placeRescueArrow(
     grid: Grid,
     id: number,
@@ -622,7 +649,122 @@ function placeRescueArrow(
         path.push({ x: curX, y: curY });
     }
 
+    // The arrow's `direction` (driving the arrowhead's visual rotation) is
+    // re-synced to match the body geometry by `alignDirectionsWithGeometry`
+    // at the end of generateLevel — so we can store anything sensible here.
     return { id, direction: exitDir, path, color: COLORS[id % COLORS.length] };
+}
+
+// Last-resort cleanup for the single-cell arrow case.
+//
+// `absorbShortArrows` merges a short arrow into another arrow only when
+// their endpoints touch. On larger grids, a head-only rescue arrow can land
+// in a cell whose neighbours are all MIDDLE cells of other arrows — no
+// endpoint match exists and absorb gives up, shipping a lone arrowhead.
+//
+// This pass guarantees no head-only arrow escapes: for each one, find any
+// adjacent cell that's part of some other arrow's path. If that cell is an
+// endpoint, simple prepend/append. If it's mid-path, SPLIT the host arrow
+// there — the prefix swallows the head-only cell as its new tail, and the
+// suffix becomes a brand-new arrow whose direction is synced by
+// `alignDirectionsWithGeometry` later. The newly-created sub-arrow may
+// itself be short, which is why we run `absorbShortArrows` again afterward.
+function forceAbsorbHeadOnly(arrows: Arrow[]): Arrow[] {
+    const result = arrows.map(a => ({ ...a, path: [...a.path] }));
+    // Bounded loop: each iteration removes one head-only arrow. Splitting
+    // a host into prefix + suffix creates at most one new arrow, so the
+    // total arrow count is non-decreasing but bounded by O(N) total
+    // operations; the safety budget below is generous.
+    let safety = result.length * 8 + 64;
+    while (safety-- > 0) {
+        const badIdx = result.findIndex(a => a.path.length === 1);
+        if (badIdx === -1) break;
+        const bad = result[badIdx];
+        const c = bad.path[0];
+
+        // Pass 1: endpoint match (no split needed, always wins).
+        let hostIdx = -1;
+        let endpoint: 'head' | 'tail' | null = null;
+        for (let i = 0; i < result.length; i++) {
+            if (i === badIdx) continue;
+            const path = result[i].path;
+            if (isAdjacent(path[path.length - 1], c)) { hostIdx = i; endpoint = 'tail'; break; }
+            if (isAdjacent(path[0], c)) { hostIdx = i; endpoint = 'head'; break; }
+        }
+
+        // Pass 2: middle-cell split. To avoid pingponging head-only arrows
+        // back and forth (split → 1-cell suffix → split again at the same
+        // neighbour → original tail re-orphaned), prefer a split that
+        // produces a suffix of length >= 2. Only fall back to a 1-cell
+        // suffix split when nothing better exists.
+        let splitCellIdx = -1;
+        let fallbackSplitHost = -1;
+        let fallbackSplitCellIdx = -1;
+        if (hostIdx === -1) {
+            for (let i = 0; i < result.length; i++) {
+                if (i === badIdx) continue;
+                const path = result[i].path;
+                const j = path.findIndex(p => isAdjacent(p, c));
+                if (j === -1) continue;
+                const suffixLen = path.length - 1 - j;
+                if (suffixLen >= 2) { hostIdx = i; splitCellIdx = j; break; }
+                if (fallbackSplitHost === -1) { fallbackSplitHost = i; fallbackSplitCellIdx = j; }
+            }
+            if (hostIdx === -1) { hostIdx = fallbackSplitHost; splitCellIdx = fallbackSplitCellIdx; }
+        }
+
+        if (hostIdx === -1) break; // truly orphan — extreme edge case.
+
+        const host = result[hostIdx];
+        if (endpoint === 'tail') {
+            host.path.push(c);
+        } else if (endpoint === 'head') {
+            // Direction will be re-synced from the new head in the final pass.
+            host.path.unshift(c);
+        } else {
+            // Middle split: prefix swallows c as its new tail, suffix
+            // becomes a new arrow whose direction will be synthesized later.
+            const suffix = host.path.slice(splitCellIdx + 1);
+            host.path = host.path.slice(0, splitCellIdx + 1);
+            host.path.push(c);
+            if (suffix.length > 0) {
+                result.push({
+                    id: -1,
+                    direction: 'N',
+                    path: suffix,
+                    color: '',
+                });
+            }
+        }
+        result.splice(badIdx, 1);
+    }
+    return result;
+}
+
+// Final pass: make every arrow's `direction` (used to rotate the arrowhead
+// visual) match the body geometry. The invariant is: the step from path[0]
+// to path[1] must equal `-INWARD[direction]` — i.e. the body grows AWAY
+// from where the arrowhead points.
+//
+// Most arrows from the main loop already satisfy this (their first body
+// step IS INWARD[chosen exit]). Rescue arrows can violate it when the
+// inward step is blocked; this pass quietly corrects them by deriving the
+// direction from the tangent at the head.
+//
+// Trade-off: the corrected direction may not be in the cell's
+// `getExitDirs` set, so the arrow can start blocked. That's already a
+// normal puzzle state — many arrows wait on their neighbours to clear
+// before becoming tappable.
+function alignDirectionsWithGeometry(arrows: Arrow[]): Arrow[] {
+    return arrows.map(a => {
+        if (a.path.length < 2) return a; // head-only — no body to align with
+        const head = a.path[0];
+        const next = a.path[1];
+        const dx = next.x - head.x;
+        const dy = next.y - head.y;
+        const aligned = exitForStep(dx, dy);
+        return aligned === a.direction ? a : { ...a, direction: aligned };
+    });
 }
 
 // CLEANUP PASS #2 — "Rescue empty regions"
@@ -787,6 +929,22 @@ export function generateLevel(
     // E.4 — Final tidy: any arrow shorter than ABSORB_MIN gets merged into
     // a neighbouring arrow if possible.
     result = absorbShortArrows(result, ABSORB_MIN);
+
+    // E.5 — Aggressive head-only cleanup. `absorbShortArrows` only merges
+    // when arrow endpoints touch; any head-only arrow stranded among
+    // middle cells slips through. Split a host arrow if needed so the lone
+    // arrowhead always lands inside someone's body.
+    result = forceAbsorbHeadOnly(result);
+
+    // E.6 — Run absorb again; the head-only split above can leave a
+    // 1- or 2-cell suffix arrow that should be merged on the new endpoints.
+    result = absorbShortArrows(result, ABSORB_MIN);
+
+    // E.7 — Resync each arrow's `direction` (drives arrowhead rotation) to
+    // match the body geometry. Catches both the rescue-arrow misalignment
+    // case and the prepended-via-merge case where the head moved but
+    // `direction` didn't update.
+    result = alignDirectionsWithGeometry(result);
 
     // ── STAGE F ── HAND OFF THE FINISHED LEVEL ───────────────────────────
     // Re-number the arrows 0..N-1 and re-assign palette colours so the ids

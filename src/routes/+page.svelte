@@ -489,16 +489,18 @@
 			// Cross product detects a direction change (turn vs straight)
 			if (Math.abs(dx1 * dy2 - dy1 * dx2) < 0.001 * len1 * len2) {
 				d += ` L ${bx} ${by}`; // straight — pass through
-			} else if (r === 0) {
-				// Sharp corner. Emitting `L bx by Q bx by bx by` (a zero-radius
-				// quadratic Bézier whose control point and both endpoints sit
-				// at the same point) tickles a Safari/WebKit rendering bug at
-				// 90° joins — strokes visibly thicken and thin around the
-				// degenerate curve. Emit a plain `L` for sharp corners instead.
-				d += ` L ${bx} ${by}`;
 			} else {
-				const r1 = Math.min(r, len1 / 2);
-				const r2 = Math.min(r, len2 / 2);
+				// Emit a quadratic Bézier even when "rounded corners" is off.
+				// A true sharp corner (a plain `L bx by`) creates zero-thickness
+				// extreme points at the inner L-corner and outer miter spike —
+				// browsers anti-alias those as a visible "pinch" where the
+				// straight segments meet, especially at thin strokes on mobile.
+				// A tiny radius (effR = STROKE_WIDTH / 2 when r is 0) smooths
+				// the stroke geometry just enough to read as uniformly thick,
+				// while still looking visually sharp at every grid scale.
+				const effR = r === 0 ? 0.03 : r;
+				const r1 = Math.min(effR, len1 / 2);
+				const r2 = Math.min(effR, len2 / 2);
 				const p1x = bx - (dx1 / len1) * r1, p1y = by - (dy1 / len1) * r1;
 				const p2x = bx + (dx2 / len2) * r2, p2y = by + (dy2 / len2) * r2;
 				d += ` L ${p1x} ${p1y} Q ${bx} ${by} ${p2x} ${p2y}`;

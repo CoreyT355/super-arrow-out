@@ -77,6 +77,16 @@ const INWARD: Record<Direction, GridPos> = {
     W: { x: 1, y: 0 },
 };
 
+// OUTWARD = step vector for the arrow's EXIT (mirror of INWARD). Used by the
+// solvability check to walk the exit ray from the head. Kept here rather than
+// imported from $lib/constants/theme so this module stays self-contained.
+const OUTWARD: Record<Direction, GridPos> = {
+    N: { x: 0, y: -1 },
+    S: { x: 0, y: 1 },
+    E: { x: 1, y: 0 },
+    W: { x: -1, y: 0 },
+};
+
 // The board is just a 2D array of strings — every cell is either empty (no
 // arrow yet) or occupied (some arrow's body covers it).
 type Grid = ('empty' | 'occupied')[][];
@@ -805,14 +815,141 @@ function rescueEmptyRegions(
     return result;
 }
 
+// ─── SOLVABILITY VALIDATION ──────────────────────────────────────────────
+//
+// Two kinds of broken arrows can slip through the pipeline above:
+//
+//   1. SELF-BLOCKING — the arrow's body wraps around such that some body
+//      cell sits in the head's own exit ray. The game's runtime blocking
+//      check excludes the arrow's own body (the whole snake clears in one
+//      tap), so it's *technically* tappable — but visually the snake
+//      appears to block itself, which reads as a bug.
+//
+//   2. DEADLOCKED PAIR/CYCLE — two or more arrows form a cycle of mutual
+//      blocking (A's body sits in B's exit ray AND B's body sits in A's
+//      exit ray). Neither can ever be tapped → the puzzle is unsolvable.
+//
+// Validation: build the directed graph "A depends on B" iff B's body is in
+// A's exit ray. The puzzle is solvable iff that graph is a DAG, which we
+// check with a Kahn-style topological peel. Self-blocking is a separate
+// per-arrow check; we fix it in place where possible by reversing the
+// path (the OLD tail becomes the new head, exiting the opposite way —
+// usually a viable direction since the body grew toward it).
+
+/** True if the head's exit ray crosses any cell of the arrow's own body. */
+function isSelfBlocked(arrow: Arrow, w: number, h: number): boolean {
+    const d = OUTWARD[arrow.direction];
+    const own = new Set(arrow.path.map(p => p.y * w + p.x));
+    let x = arrow.path[0].x + d.x;
+    let y = arrow.path[0].y + d.y;
+    while (inBounds(x, y, w, h)) {
+        if (own.has(y * w + x)) return true;
+        x += d.x;
+        y += d.y;
+    }
+    return false;
+}
+
+/** Build the blocking dep graph and topologically peel it. Solvable iff
+ *  every arrow is reached — any survivors form a deadlock cycle. */
+function isPuzzleSolvable(arrows: Arrow[], w: number, h: number): boolean {
+    // cell key -> owning arrow id
+    const owner = new Map<number, number>();
+    for (const a of arrows) for (const p of a.path) owner.set(p.y * w + p.x, a.id);
+
+    // deps.get(id) = set of arrow ids whose bodies sit in `id`'s exit ray;
+    // those must drain before `id` can be tapped.
+    const deps = new Map<number, Set<number>>();
+    for (const a of arrows) {
+        const set = new Set<number>();
+        const d = OUTWARD[a.direction];
+        let x = a.path[0].x + d.x;
+        let y = a.path[0].y + d.y;
+        while (inBounds(x, y, w, h)) {
+            const o = owner.get(y * w + x);
+            if (o !== undefined && o !== a.id) set.add(o);
+            x += d.x;
+            y += d.y;
+        }
+        deps.set(a.id, set);
+    }
+
+    // Iteratively "remove" arrows whose deps are all already removed. If we
+    // ever finish a full pass with no progress, the survivors are a cycle.
+    const removed = new Set<number>();
+    let progress = true;
+    while (progress && removed.size < arrows.length) {
+        progress = false;
+        for (const a of arrows) {
+            if (removed.has(a.id)) continue;
+            let ready = true;
+            for (const d of deps.get(a.id)!) {
+                if (!removed.has(d)) { ready = false; break; }
+            }
+            if (ready) { removed.add(a.id); progress = true; }
+        }
+    }
+    return removed.size === arrows.length;
+}
+
+/** Try to repair each self-blocked arrow in place by reversing its path
+ *  (and re-deriving direction from the new head). If a reversed arrow is
+ *  still self-blocked, the geometry is fundamentally bad — return null so
+ *  the caller falls through to full regeneration. */
+function fixSelfBlockedArrows(arrows: Arrow[], w: number, h: number): Arrow[] | null {
+    const fixed: Arrow[] = [];
+    for (const a of arrows) {
+        if (!isSelfBlocked(a, w, h)) { fixed.push(a); continue; }
+        if (a.path.length < 2) { fixed.push(a); continue; } // head-only — no reverse possible
+
+        // Reverse the path. Direction must be re-derived from the new
+        // head's tangent to match the post-reverse geometry.
+        const reversed = [...a.path].reverse();
+        const head = reversed[0];
+        const next = reversed[1];
+        const newDir = exitForStep(next.x - head.x, next.y - head.y);
+        const candidate: Arrow = { ...a, path: reversed, direction: newDir };
+        if (isSelfBlocked(candidate, w, h)) return null; // unfixable in place
+        fixed.push(candidate);
+    }
+    return fixed;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // THE PUBLIC ENTRY POINT.
 // Called once per puzzle. Returns a finished Level: width, height, and a
 // list of Arrows that fully tile the grid.
+//
+// Wraps the actual generation in a validate-and-retry loop: each attempt
+// runs the pipeline, then we (a) reverse any self-blocked arrows and
+// (b) check the blocking graph is a DAG. If both pass, we ship. Otherwise
+// we regenerate, up to MAX_GEN_ATTEMPTS times. After exhausting attempts
+// we ship the last attempt anyway with a warning rather than hang the UI
+// — but in practice good levels are found in the first 1–2 tries.
 // ─────────────────────────────────────────────────────────────────────────
-export function generateLevel(
-    width = 9,
-    height = 9
+const MAX_GEN_ATTEMPTS = 12;
+
+export function generateLevel(width = 9, height = 9): Level {
+    let last: Level | null = null;
+    for (let attempt = 0; attempt < MAX_GEN_ATTEMPTS; attempt++) {
+        const candidate = generateLevelOnce(width, height);
+        const fixed = fixSelfBlockedArrows(candidate.arrows, width, height);
+        if (fixed === null) { last = candidate; continue; }
+        if (!isPuzzleSolvable(fixed, width, height)) { last = { ...candidate, arrows: fixed }; continue; }
+        return { ...candidate, arrows: fixed };
+    }
+    // Shipped attempts always exist (last is set on every miss); fallback
+    // path is only reached when ALL attempts had unfixable geometry or
+    // unbreakable cycles — extremely rare in practice on shipped sizes.
+    if (typeof console !== 'undefined') {
+        console.warn(`[puzzleGenerator] exhausted ${MAX_GEN_ATTEMPTS} attempts on ${width}x${height} without a fully solvable level`);
+    }
+    return last!;
+}
+
+function generateLevelOnce(
+    width: number,
+    height: number,
 ): Level {
     // STAGE A — set up state.
     const grid = makeGrid(width, height);   // fresh empty board

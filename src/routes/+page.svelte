@@ -4,6 +4,12 @@
 	import { panZoom, type PanZoomState } from '$lib/actions/panZoom.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import Board from '$lib/components/Board.svelte';
+	import TopBar from '$lib/components/TopBar.svelte';
+	import ResumeCard from '$lib/components/ResumeCard.svelte';
+	import DifficultyButton from '$lib/components/DifficultyButton.svelte';
+	import WinOverlay from '$lib/components/WinOverlay.svelte';
+	import LoseOverlay from '$lib/components/LoseOverlay.svelte';
+	import { MAX_LIVES } from '$lib/constants/game';
 	import { roundedPath, measurePath, buildFullRoute } from '$lib/utils/svgPath';
 	import { extPos, segPos, exitCellCount, checkBlocked } from '$lib/utils/snakeMath';
 	import { computeS, isFlashRed } from '$lib/utils/animTiming';
@@ -14,7 +20,7 @@
 	import { settings } from '$lib/stores/settings.svelte';
 	import { progress as progressStore } from '$lib/stores/progress.svelte';
 	import { resume as resumeStore, type ResumeData } from '$lib/stores/resume.svelte';
-	import { DIFFICULTIES, ENABLED_DIFFICULTIES, computeGridSize, gridCaption } from '$lib/config/difficulties';
+	import { DIFFICULTIES, ENABLED_DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
 	import {
 		MS_PER_STEP,
 		NUDGE_FWD,
@@ -38,9 +44,7 @@
 	let W = $state(9);
 	let H = $state(9);
 
-	// `Anim` and `AnimPhase` live in $lib/types.
-
-	const MAX_LIVES = 3;
+	// `Anim` and `AnimPhase` live in $lib/types; MAX_LIVES in $lib/constants/game.
 
 	let level             = $state(generateLevel(9, 9));
 	let removed           = $state(new Set<number>());
@@ -501,73 +505,15 @@
 
 		<div class="flex flex-col gap-4 w-full max-w-xs">
 			{#if resumeState}
-				{@const remaining = resumeState.totalArrows - resumeState.removedIds.length}
-				<button
-					onclick={resumeGame}
-					class="flex items-center gap-4 py-4 px-5 rounded-2xl border-2 transition-all duration-150
-					       hover:scale-[1.02] active:scale-[0.98]
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500
-					       {darkMode
-					           ? 'bg-emerald-950/60 border-emerald-700 hover:bg-emerald-900/70'
-					           : 'bg-emerald-50 border-emerald-400 hover:bg-emerald-100'}"
-				>
-					<!-- Play icon -->
-					<span class="shrink-0 flex items-center justify-center w-10 h-10 rounded-full
-					             {darkMode ? 'bg-emerald-700' : 'bg-emerald-500'}">
-						<svg width="14" height="14" viewBox="0 0 14 14" fill="white">
-							<polygon points="3,1 13,7 3,13"/>
-						</svg>
-					</span>
-					<div class="flex flex-col items-start flex-1 min-w-0">
-						<div class="flex items-center justify-between w-full">
-							<span class="font-bold text-base {darkMode ? 'text-emerald-300' : 'text-emerald-700'}">
-								Resume Puzzle
-							</span>
-							<!-- Lives remaining -->
-							<div class="flex gap-0.5" aria-label="{resumeState.lives} lives remaining">
-								{#each Array(MAX_LIVES) as _, i}
-									<span class="text-base {i < resumeState.lives
-										? (darkMode ? 'text-red-400' : 'text-red-500')
-										: (darkMode ? 'text-slate-700' : 'text-slate-300')}">
-										{i < resumeState.lives ? '♥' : '♡'}
-									</span>
-								{/each}
-							</div>
-						</div>
-						<span class="text-sm {darkMode ? 'text-emerald-500' : 'text-emerald-600'}">
-							{resumeState.difficulty ?? 'Custom'} · {remaining} arrow{remaining === 1 ? '' : 's'} left
-						</span>
-					</div>
-				</button>
+				<ResumeCard resume={resumeState} onResume={resumeGame} />
 			{/if}
 
 			{#each ENABLED_DIFFICULTIES as d}
-				{@const count = progress[d.label] ?? 0}
-				<button
-					onclick={() => startGame(d.cells, d.square)}
-					class="group relative flex items-center py-4 px-5 rounded-2xl bg-gradient-to-br {d.color}
-					       shadow-lg hover:scale-[1.03] active:scale-[0.98] transition-transform duration-150
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white
-					       focus-visible:ring-offset-2 {darkMode ? 'focus-visible:ring-offset-slate-900' : 'focus-visible:ring-offset-slate-100'}"
-					style={'bgStyle' in d ? d.bgStyle : ''}
-				>
-					<!-- Label + grid size -->
-					<div class="flex flex-col items-start flex-1 min-w-0">
-						<span class="text-white font-bold text-xl tracking-wide">{d.label}</span>
-						<span class="text-white/90 text-sm">{gridCaption(d.cells, d.square)}</span>
-					</div>
-					<!-- Completion count badge -->
-					<div class="flex flex-col items-center justify-center ml-3 shrink-0 min-w-[3rem]">
-						{#if count > 0}
-							<span class="text-2xl font-extrabold text-white leading-none">{count}</span>
-							<span class="text-white/85 text-[10px] uppercase tracking-widest mt-0.5">
-								{count === 1 ? 'win' : 'wins'}
-							</span>
-						{:else}
-							<span class="text-white/30 text-xs">—</span>
-						{/if}
-					</div>
-				</button>
+				<DifficultyButton
+					difficulty={d}
+					wins={progress[d.label] ?? 0}
+					onStart={() => startGame(d.cells, d.square)}
+				/>
 			{/each}
 		</div>
 
@@ -760,64 +706,14 @@
 	<main class="relative w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col overflow-hidden">
 
 		<!-- ── Top bar ──────────────────────────────────────────────────────────── -->
-		<!-- h-12 = 3rem fixed; shrink-0 prevents flex from squishing it -->
-		<div class="shrink-0 flex items-center gap-2 px-3 border-b {darkMode ? 'border-slate-800/80 bg-slate-900/95' : 'border-slate-300/80 bg-slate-100/95'} backdrop-blur-sm"
-		     style="padding-top: env(safe-area-inset-top); min-height: calc(3rem + env(safe-area-inset-top))"
-		     inert={won || lost}>
-
-			<!-- Hamburger button — always visible -->
-			<button
-				class="flex items-center justify-center w-11 h-11 rounded-lg transition-colors active:scale-95
-				       {darkMode
-				           ? 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'
-				           : 'bg-slate-200 text-slate-500 hover:bg-slate-300 hover:text-slate-800'}"
-				onclick={() => (menuOpen = !menuOpen)}
-				aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-			>
-				{#if menuOpen}
-					<!-- × close icon -->
-					<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-						<line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/>
-					</svg>
-				{:else}
-					<!-- ☰ hamburger icon -->
-					<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-						<line x1="2" y1="4.5" x2="14" y2="4.5"/>
-						<line x1="2" y1="8"   x2="14" y2="8"/>
-						<line x1="2" y1="11.5" x2="14" y2="11.5"/>
-					</svg>
-				{/if}
-			</button>
-
-			<!-- Spacer -->
-			<div class="flex-1"></div>
-
-<!-- Hearts — always visible on every screen size -->
-<div class="flex items-center gap-4 pr-1">
-	{#if !showLoading}
-		<span
-			class="text-sm font-medium {darkMode ? 'text-slate-400' : 'text-slate-500'}"
-			aria-live="polite"
-			aria-atomic="true"
-		>
-			{level.arrows.length - removed.size} arrows left
-		</span>
-	{/if}
-	<div
-		class="flex items-center gap-1.5"
-		role="img"
-		aria-label="{lives} of {MAX_LIVES} lives remaining"
-		aria-live="polite"
-	>
-		{#each Array(MAX_LIVES) as _, i}
-			<span
-				aria-hidden="true"
-				class="text-xl leading-none select-none transition-all duration-300
-				       {i < lives ? 'text-red-500 drop-shadow-[0_0_6px_rgba(239,68,68,0.8)]' : darkMode ? 'text-slate-700' : 'text-slate-300'}"
-			>♥</span>
-		{/each}
-	</div>
-</div>
+		<div inert={won || lost}>
+			<TopBar
+				{menuOpen}
+				arrowsLeft={level.arrows.length - removed.size}
+				{lives}
+				{showLoading}
+				onToggleMenu={() => (menuOpen = !menuOpen)}
+			/>
 		</div>
 
 		<!-- Mobile overlay menu (floats over the board, doesn't push layout) -->
@@ -906,86 +802,25 @@
 			/>
 		</div>
 
-		<!-- Win panel — appears after the vortex collapse finishes -->
-		<!-- Lifted out of the board container so it stays interactive when the
-		     surrounding game UI is marked inert. Covers the full screen. -->
+		<!-- Win panel — covers the full screen so it stays interactive while
+		     the surrounding game UI is marked inert. -->
 		{#if won && vortexDone}
-			<div class="absolute inset-0 flex items-center justify-center z-50 {darkMode ? 'bg-slate-950/75' : 'bg-slate-300/70'}"
-			     transition:fly={{ y: reducedMotion ? 0 : 16, duration: reducedMotion ? 160 : 280, opacity: 0 }}>
-				<div
-					use:trapFocus
-					role="alertdialog"
-					aria-modal="true"
-					aria-labelledby="win-panel-title"
-					class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
-					       {darkMode
-					           ? 'bg-slate-900/90 border border-slate-700/60'
-					           : 'bg-white/95 border border-slate-200/60'}"
-				>
-					<div class="text-4xl mb-2" aria-hidden="true">🎉</div>
-					<p id="win-panel-title" class="text-2xl font-extrabold tracking-tight {darkMode ? 'text-white' : 'text-slate-900'}">Level Complete</p>
-					<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">All {level.arrows.length} arrows cleared</p>
-					<div class="flex gap-1 mt-1" role="img" aria-label="{lives} of {MAX_LIVES} lives remaining">
-						{#each Array(MAX_LIVES) as _, i}
-							<span aria-hidden="true" class="text-lg transition-all {i < lives ? 'text-red-500' : darkMode ? 'text-slate-700' : 'text-slate-300'}">
-								{i < lives ? '♥' : '♡'}
-							</span>
-						{/each}
-					</div>
-					<button
-						onclick={() => reset(false)}
-						class="w-full px-8 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95
-						       text-white font-bold text-lg shadow-lg shadow-emerald-900/50 transition-all duration-150
-						       flex items-center justify-center gap-2"
-					>
-						<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-							<polygon points="6,3 15,9 6,15" fill="currentColor" stroke="none"/>
-						</svg>
-						New Level
-					</button>
-					<button
-						onclick={goToMenu}
-						class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
-						       {darkMode
-						           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
-						           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
-					>← Main Menu</button>
-				</div>
-			</div>
+			<WinOverlay
+				arrowCount={level.arrows.length}
+				{lives}
+				{reducedMotion}
+				onNewLevel={() => reset(false)}
+				onMenu={goToMenu}
+			/>
 		{/if}
 
 		<!-- Game-over panel — full-screen, alerts the user the game is decided. -->
 		{#if lost}
-			<div class="absolute inset-0 flex items-center justify-center z-50 {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/75'}">
-				<div
-					use:trapFocus
-					role="alertdialog"
-					aria-modal="true"
-					aria-labelledby="loss-panel-title"
-					class="flex flex-col items-center gap-4 px-8 py-7 rounded-2xl shadow-2xl
-					       {darkMode
-					           ? 'bg-slate-900/90 border border-slate-700/60'
-					           : 'bg-white/95 border border-slate-200/60'}"
-				>
-					<div class="text-4xl mb-2" aria-hidden="true">💔</div>
-					<p id="loss-panel-title" class="text-2xl font-extrabold text-red-500 tracking-tight">Game Over</p>
-					<p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
-						{level.arrows.length - removed.size} arrows left
-					</p>
-					<button
-						onclick={() => reset(true)}
-						class="w-full px-8 py-3 rounded-2xl bg-red-600 hover:bg-red-500 active:scale-95
-						       text-white font-bold text-lg shadow-lg shadow-red-900/50 transition-all duration-150"
-					>↺ Try Again</button>
-					<button
-						onclick={goToMenu}
-						class="px-6 py-2 rounded-xl active:scale-95 text-sm font-medium border transition-all duration-150
-						       {darkMode
-						           ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700/60'
-						           : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'}"
-					>← Main Menu</button>
-				</div>
-			</div>
+			<LoseOverlay
+				arrowsLeft={level.arrows.length - removed.size}
+				onTryAgain={() => reset(true)}
+				onMenu={goToMenu}
+			/>
 		{/if}
 	</main>
 {/if}

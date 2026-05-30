@@ -17,3 +17,27 @@ export interface Level {
   height: number;
   arrows: Arrow[];
 }
+
+// ─── animation types ──────────────────────────────────────────────────────────
+//
+// One Anim per arrow currently animating. The `phase` discriminates which
+// fields are populated:
+//
+//   exiting       — drain via stroke-dasharray + dashoffset along routeD.
+//   blocked-fwd   — initial nudge toward the blocker (eased out).
+//   blocked-back  — spring back to rest (eased in).
+//   blocked-flash — red-flash penalty before the arrow becomes inert.
+
+export type AnimPhase = 'exiting' | 'blocked-fwd' | 'blocked-back' | 'blocked-flash';
+
+export interface Anim {
+    phase:       AnimPhase;
+    startTime:   number;
+    totalSteps?: number;
+    maxSteps?:   number;
+    // drain animation (set when phase === 'exiting')
+    routeD?:     string;  // SVG path string for the full route (tail → head → extension)
+    L_total?:    number;  // total length of routeD in SVG units (cells)
+    L_snake?:    number;  // length of just the snake portion = the visible "dash"
+    durationMs?: number;  // total exit animation duration
+}

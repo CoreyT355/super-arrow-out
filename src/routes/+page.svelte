@@ -2,7 +2,10 @@
 	import { generateLevel } from '$lib/utils/puzzleGenerator';
 	import { trapFocus } from '$lib/utils/trapFocus';
 	import { clampPan as clampPanPure, cellAt as cellAtPure } from '$lib/utils/gestures';
-	import type { Direction, GridPos, Arrow, Level } from '$lib/types';
+	import { roundedPath, measurePath, buildFullRoute } from '$lib/utils/svgPath';
+	import { extPos, segPos, exitCellCount, checkBlocked } from '$lib/utils/snakeMath';
+	import { computeS, isFlashRed } from '$lib/utils/animTiming';
+	import type { Direction, GridPos, Arrow, Level, Anim } from '$lib/types';
 	import { fly } from 'svelte/transition';
 	import { tick } from 'svelte';
 	import { generateInWorker } from '$lib/workers/workerBridge';
@@ -33,19 +36,7 @@
 	let W = $state(9);
 	let H = $state(9);
 
-	type Phase = 'exiting' | 'blocked-fwd' | 'blocked-back' | 'blocked-flash';
-
-	interface Anim {
-		phase: Phase;
-		startTime: number;
-		totalSteps?: number;
-		maxSteps?: number;
-		// drain animation (set when phase === 'exiting')
-		routeD?: string;     // SVG path string for the full route (tail → head → extension)
-		L_total?: number;    // total length of routeD in SVG units (cells)
-		L_snake?: number;    // length of just the snake portion = the visible "dash"
-		durationMs?: number; // total exit animation duration
-	}
+	// `Anim` and `AnimPhase` live in $lib/types.
 
 	const MAX_LIVES = 3;
 
@@ -336,158 +327,10 @@
 		};
 	}
 
-	// ─── rounded snake path ──────────────────────────────────────────────────────
-
-	// Converts animated segment positions into an SVG path string.
-	// Straight runs use L; turns use a quadratic bézier (Q) so corners are smooth.
-	function roundedPath(pts: { x: number; y: number }[], r: number): string {
-		if (pts.length === 0) return '';
-		const cx = (p: { x: number; y: number }) => p.x + 0.5;
-		const cy = (p: { x: number; y: number }) => p.y + 0.5;
-		if (pts.length === 1) return `M ${cx(pts[0])} ${cy(pts[0])}`;
-		if (pts.length === 2) return `M ${cx(pts[0])} ${cy(pts[0])} L ${cx(pts[1])} ${cy(pts[1])}`;
-
-		let d = `M ${cx(pts[0])} ${cy(pts[0])}`;
-
-		for (let i = 1; i < pts.length - 1; i++) {
-			const ax = cx(pts[i - 1]), ay = cy(pts[i - 1]);
-			const bx = cx(pts[i    ]), by = cy(pts[i    ]);
-			const ex = cx(pts[i + 1]), ey = cy(pts[i + 1]);
-
-			const dx1 = bx - ax, dy1 = by - ay;
-			const dx2 = ex - bx, dy2 = ey - by;
-			const len1 = Math.hypot(dx1, dy1) || 1;
-			const len2 = Math.hypot(dx2, dy2) || 1;
-
-			// Cross product detects a direction change (turn vs straight)
-			if (Math.abs(dx1 * dy2 - dy1 * dx2) < 0.001 * len1 * len2) {
-				d += ` L ${bx} ${by}`; // straight — pass through
-			} else {
-				// Emit a quadratic Bézier even when "rounded corners" is off.
-				// A true sharp corner (a plain `L bx by`) creates zero-thickness
-				// extreme points at the inner L-corner and outer miter spike —
-				// browsers anti-alias those as a visible "pinch" where the
-				// straight segments meet, especially at thin strokes on mobile.
-				// A tiny radius (effR = STROKE_WIDTH / 2 when r is 0) smooths
-				// the stroke geometry just enough to read as uniformly thick,
-				// while still looking visually sharp at every grid scale.
-				const effR = r === 0 ? 0.03 : r;
-				const r1 = Math.min(effR, len1 / 2);
-				const r2 = Math.min(effR, len2 / 2);
-				const p1x = bx - (dx1 / len1) * r1, p1y = by - (dy1 / len1) * r1;
-				const p2x = bx + (dx2 / len2) * r2, p2y = by + (dy2 / len2) * r2;
-				d += ` L ${p1x} ${p1y} Q ${bx} ${by} ${p2x} ${p2y}`;
-			}
-		}
-
-		d += ` L ${cx(pts[pts.length - 1])} ${cy(pts[pts.length - 1])}`;
-		return d;
-	}
-
-	// ─── easing ─────────────────────────────────────────────────────────────────
-
-	function easeOut(t: number) { return 1 - (1 - t) ** 2; }
-	function easeIn(t:  number) { return t * t; }
-
-	// ─── snake-flow math ─────────────────────────────────────────────────────────
-
-	function extPos(path: GridPos[], i: number, d: { dx: number; dy: number }) {
-		if (i >= 0) return path[i];
-		return { x: path[0].x + (-i) * d.dx, y: path[0].y + (-i) * d.dy };
-	}
-
-	function segPos(path: GridPos[], k: number, s: number, d: { dx: number; dy: number }) {
-		const lo = Math.floor(s), f = s - lo;
-		const a = extPos(path, k - lo,     d);
-		const b = extPos(path, k - lo - 1, d);
-		return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
-	}
-
-	// Number of cells from the arrow's head to the grid boundary, in the exit direction.
-	// Equals 1 when the head is already on the edge row/column.
-	function exitCellCount(arrow: Arrow): number {
-		const h = arrow.path[0];
-		return arrow.direction === 'W' ? h.x + 1
-			:  arrow.direction === 'E' ? W - h.x
-			:  arrow.direction === 'N' ? h.y + 1
-			:                            H - h.y;
-	}
-
-	// ─── drain animation: dasharray + dashoffset along an extended path ──────────
-
-	// Hidden singleton path used to measure SVG path lengths off-screen.
-	// (getTotalLength works on detached elements in Chrome/Safari, but Firefox
-	//  historically required attachment — so we keep one in a hidden <svg>.)
-	let _measurer: SVGPathElement | null = null;
-	function measurePath(d: string): number {
-		if (typeof document === 'undefined') return 0;
-		if (!_measurer) {
-			const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-			svg.setAttribute('width',  '0');
-			svg.setAttribute('height', '0');
-			svg.style.position      = 'absolute';
-			svg.style.visibility    = 'hidden';
-			svg.style.pointerEvents = 'none';
-			_measurer = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-			svg.appendChild(_measurer);
-			document.body.appendChild(svg);
-		}
-		_measurer.setAttribute('d', d);
-		return _measurer.getTotalLength();
-	}
-
-	// Build the full drain route: the snake's cells in TAIL → HEAD order,
-	// followed by enough extension cells in arrow.direction that the snake-
-	// length dash can fully slide off the grid.
-	function buildFullRoute(arrow: Arrow): string {
-		const dir = DELTA[arrow.direction];
-		const N   = arrow.path.length;
-		const extra = exitCellCount(arrow) + N + 2; // generous so dash exits cleanly
-
-		const pts: GridPos[] = [];
-		for (let i = N - 1; i >= 0; i--) pts.push(arrow.path[i]);
-		for (let k = 1; k <= extra; k++) {
-			pts.push({ x: arrow.path[0].x + k * dir.dx, y: arrow.path[0].y + k * dir.dy });
-		}
-		return roundedPath(pts, roundedCorners ? 0.4 : 0);
-	}
-
-	// ─── step position for blocked phases ────────────────────────────────────────
-
-	// The exiting phase no longer uses computeS — it's driven by elapsed/durationMs
-	// directly via stroke-dashoffset. Only the blocked nudge needs this.
-	function computeS(anim: Anim | undefined, elapsed: number): number {
-		if (!anim) return 0;
-		if (anim.phase === 'blocked-fwd')
-			return easeOut(Math.min(elapsed / NUDGE_FWD, 1)) * (anim.maxSteps ?? 0);
-		if (anim.phase === 'blocked-back')
-			return (1 - easeIn(Math.min(elapsed / NUDGE_BACK, 1))) * (anim.maxSteps ?? 0);
-		return 0;
-	}
-
-	function isFlashRed(anim: Anim, elapsed: number) {
-		return anim.phase === 'blocked-flash' && Math.floor(elapsed / FLASH_HALF) % 2 === 0;
-	}
-
-	// ─── blocking check ──────────────────────────────────────────────────────────
-
-	function checkBlocked(arrow: Arrow): { blocked: boolean; dist: number } {
-		const d = DELTA[arrow.direction];
-		const walls = new Set<string>();
-		for (const a of level.arrows) {
-			if (a.id === arrow.id || removed.has(a.id)) continue;
-			if (anims[a.id]?.phase === 'exiting') continue;
-			for (const p of a.path) walls.add(`${p.x},${p.y}`);
-		}
-		let { x, y } = arrow.path[0];
-		x += d.dx; y += d.dy;
-		let dist = 0;
-		while (x >= 0 && x < W && y >= 0 && y < H) {
-			if (walls.has(`${x},${y}`)) return { blocked: true, dist };
-			dist++; x += d.dx; y += d.dy;
-		}
-		return { blocked: false, dist };
-	}
+	// roundedPath, easing, snake math, measurePath, buildFullRoute,
+	// computeS, isFlashRed, and checkBlocked all live in $lib/utils.
+	// The stateful arguments (W, H, level.arrows, removed, anims,
+	// roundedCorners) are passed into the pure helpers at the call sites.
 
 	// ─── click handler ───────────────────────────────────────────────────────────
 
@@ -498,7 +341,7 @@
 		const arrow = level.arrows.find(a => a.id === id);
 		if (!arrow) return;
 
-		const { blocked, dist } = checkBlocked(arrow);
+		const { blocked, dist } = checkBlocked(arrow, level.arrows, removed, anims, W, H);
 		const t = performance.now();
 		now = t;
 
@@ -506,8 +349,8 @@
 			// Compute drain metadata up-front: build the extended route and
 			// measure both the full route and the snake-only portion so we know
 			// how far the dash needs to slide.
-			const exitCells = exitCellCount(arrow);
-			const routeD    = buildFullRoute(arrow);
+			const exitCells = exitCellCount(arrow, W, H);
+			const routeD    = buildFullRoute(arrow, W, H, roundedCorners);
 			const snakeD    = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
 			const L_total   = measurePath(routeD);
 			const L_snake   = measurePath(snakeD);

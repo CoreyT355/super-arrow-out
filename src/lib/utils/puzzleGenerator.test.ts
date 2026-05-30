@@ -140,38 +140,159 @@ describe('generateLevel — head/body alignment invariant', () => {
     // pipeline should always absorb head-only arrows into a neighbour.
     // Trivially small grids (e.g. 4x4) can produce stuck head-only arrows
     // when no neighbour is a tail; they're not a shipped game size.
-    // Every shipped puzzle must be solvable: no arrow can be deadlocked
-    // behind another arrow that is itself deadlocked behind the first.
-    // Self-blocking arrows (own body in own exit ray) read as bugs to the
-    // player even though the runtime check excludes the arrow's own body,
-    // so they're rejected too.
-    it('every level is solvable and free of self-blocked arrows', () => {
-        const cases: Array<[number, number]> = [
-            [6, 6],     // Easy
-            [9, 9],     // Normal
-            [15, 17],   // Hard
-            [30, 34],   // Super Hard
-            [60, 68],   // Expert
-            [120, 137], // Ludicrous (closest non-square to 16384 cells)
+    // ─── solvability: ground-truth simulator ──────────────────────────────
+    //
+    // The production code uses a topological peel of the blocking
+    // dependency graph to verify solvability. That's a constructive proof,
+    // but proofs can have implementation bugs. This block adds an
+    // independent simulator that mirrors the runtime's `checkBlocked`
+    // rule exactly:
+    //
+    //   "Arrow A is blocked at moment M if walking from A's head in A's
+    //    exit direction hits a cell belonging to any other arrow that is
+    //    still present (not yet drained) at moment M."
+    //
+    // The simulator picks tap targets in arbitrary order (any non-blocked
+    // arrow), drains it, and repeats. If it can drain every arrow, the
+    // puzzle is solvable BY THE GAME'S OWN RULES, not by my topo
+    // interpretation of them.
+    //
+    // We run the simulator on every generated level and assert it agrees
+    // with the topo check. Disagreement = a bug in one of them.
+
+    /** Returns true if `arrow` can be tapped right now: nothing in `present`
+     *  except itself occupies a cell on its exit ray. Same shape as the
+     *  runtime `checkBlocked` in +page.svelte. */
+    function isTappableNow(
+        arrow: Arrow,
+        present: Set<number>,
+        cellOwner: Map<string, number>,
+        w: number,
+        h: number,
+    ): boolean {
+        const d = OUTWARD[arrow.direction];
+        let x = arrow.path[0].x + d.dx;
+        let y = arrow.path[0].y + d.dy;
+        while (x >= 0 && x < w && y >= 0 && y < h) {
+            const owner = cellOwner.get(`${x},${y}`);
+            if (owner !== undefined && owner !== arrow.id && present.has(owner)) {
+                return false;
+            }
+            x += d.dx;
+            y += d.dy;
+        }
+        return true;
+    }
+
+    /** Drain the level by greedily picking any tappable arrow. Returns the
+     *  number drained. Equal to arrows.length iff solvable. */
+    function simulateDrain(arrows: Arrow[], w: number, h: number): number {
+        const cellOwner = new Map<string, number>();
+        for (const a of arrows) for (const p of a.path) cellOwner.set(`${p.x},${p.y}`, a.id);
+        const byId = new Map(arrows.map(a => [a.id, a]));
+        const present = new Set(arrows.map(a => a.id));
+        let drained = 0;
+        let progress = true;
+        while (progress && present.size > 0) {
+            progress = false;
+            for (const id of present) {
+                if (isTappableNow(byId.get(id)!, present, cellOwner, w, h)) {
+                    present.delete(id);
+                    drained++;
+                    progress = true;
+                    break; // re-scan; ordering matters less than termination
+                }
+            }
+        }
+        return drained;
+    }
+
+    // Every shipped puzzle must be drainable by gameplay rules AND free of
+    // self-blocked arrows. Trial counts are high enough to give real
+    // statistical confidence on each shipped grid size — on a randomized
+    // generator, "didn't see the bug 3 times" is not the same as "the bug
+    // is gone." Roughly: at ~88ms/Ludicrous gen, 50 trials ≈ 4.5s.
+    it('every level is drainable and free of self-blocked arrows', () => {
+        const cases: Array<[number, number, number]> = [
+            [6, 6,     500], // Easy
+            [9, 9,     500], // Normal
+            [15, 17,   200], // Hard
+            [30, 34,   100], // Super Hard
+            [60, 68,    30], // Expert
+            [120, 137,  20], // Ludicrous (non-square ~16384 cells)
         ];
-        for (const [w, h] of cases) {
-            for (let trial = 0; trial < 3; trial++) {
-                const level = generateLevel(w, h);
+        let totalDrained = 0;
+        let totalArrows = 0;
+        for (const [w, h, trials] of cases) {
+            for (let trial = 0; trial < trials; trial++) {
+                // Seed each trial so any failure is reproducible from the
+                // printed (w, h, seed) tuple — no Math.random reruns needed.
+                const seed = (w * 1_000_003) ^ (h * 19_349_663) ^ (trial * 83_492_791);
+                const level = generateLevel(w, h, seed);
+
                 for (const arrow of level.arrows) {
                     if (isSelfBlocked(arrow, w, h)) {
                         throw new Error(
-                            `Self-blocked arrow on ${w}x${h} trial ${trial}: ` +
-                            `id=${arrow.id} dir=${arrow.direction} head=${JSON.stringify(arrow.path[0])}`
+                            `Self-blocked arrow on ${w}x${h} seed=${seed}: ` +
+                            `id=${arrow.id} dir=${arrow.direction} head=${JSON.stringify(arrow.path[0])} path=${JSON.stringify(arrow.path)}`
                         );
                     }
                 }
-                expect(
-                    isSolvable(level.arrows, w, h),
-                    `Unsolvable puzzle on ${w}x${h} trial ${trial} (${level.arrows.length} arrows)`,
-                ).toBe(true);
+
+                // Topo-based check (the production criterion).
+                const topo = isSolvable(level.arrows, w, h);
+                // Ground truth: actually drain the level using runtime rules.
+                const drained = simulateDrain(level.arrows, w, h);
+                const sim = drained === level.arrows.length;
+
+                if (topo !== sim) {
+                    throw new Error(
+                        `Solvability mismatch on ${w}x${h} seed=${seed}: ` +
+                        `topo=${topo} simulator=${sim} drained=${drained}/${level.arrows.length}`
+                    );
+                }
+                if (!sim) {
+                    throw new Error(
+                        `Unsolvable puzzle on ${w}x${h} seed=${seed}: ` +
+                        `simulator drained ${drained}/${level.arrows.length}`
+                    );
+                }
+                totalDrained += drained;
+                totalArrows += level.arrows.length;
             }
         }
-    }, 60_000);
+        // Sanity: the suite should have actually exercised something.
+        expect(totalArrows).toBeGreaterThan(0);
+        expect(totalDrained).toBe(totalArrows);
+    }, 180_000);
+
+    // Reproducibility: same seed must produce the same level. This is
+    // worth its own assertion so the seeded-trial messages above are
+    // trustworthy — a printed seed reproduces the failure on demand.
+    it('seed produces deterministic output', () => {
+        const a = generateLevel(15, 17, 42);
+        const b = generateLevel(15, 17, 42);
+        expect(a.arrows.length).toBe(b.arrows.length);
+        for (let i = 0; i < a.arrows.length; i++) {
+            expect(a.arrows[i].direction).toBe(b.arrows[i].direction);
+            expect(a.arrows[i].path).toEqual(b.arrows[i].path);
+        }
+    });
+
+    // The simulator itself: confirm it correctly reports a synthetic
+    // deadlock as unsolvable. Two arrows facing into each other's bodies.
+    it('simulator detects a hand-crafted deadlock', () => {
+        // 3-wide row:  →B B A←        (A points west, B points east)
+        // A's body is at (2,0); A points west → ray hits (1,0),(0,0) → B's body.
+        // B's body is at (0,0); B points east → ray hits (1,0),(2,0) → A's body.
+        // Neither can ever drain.
+        const deadlock: Arrow[] = [
+            { id: 0, direction: 'W', path: [{ x: 2, y: 0 }], color: '#000' },
+            { id: 1, direction: 'E', path: [{ x: 0, y: 0 }, { x: 1, y: 0 }], color: '#000' },
+        ];
+        expect(simulateDrain(deadlock, 3, 1)).toBeLessThan(deadlock.length);
+        expect(isSolvable(deadlock, 3, 1)).toBe(false);
+    });
 
     it('no arrow is head-only at playable grid sizes', () => {
         // Mirrors DIFFICULTIES in +page.svelte plus a couple of non-square

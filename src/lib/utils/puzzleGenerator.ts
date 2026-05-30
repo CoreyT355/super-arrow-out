@@ -91,6 +91,26 @@ const OUTWARD: Record<Direction, GridPos> = {
 // arrow yet) or occupied (some arrow's body covers it).
 type Grid = ('empty' | 'occupied')[][];
 
+// ─── seedable RNG ────────────────────────────────────────────────────────
+//
+// Production calls `generateLevel(w, h)` with no seed → `rng` stays
+// `Math.random`, behaviour is unchanged. Tests call `generateLevel(w, h,
+// seed)` → a deterministic mulberry32 PRNG is swapped in for the duration
+// of that one call (try/finally restores `Math.random` afterward), so
+// failing levels can be re-run from a single integer.
+//
+// Single-threaded JS + synchronous generation makes the module-level
+// mutable state safe; the worker only runs one generation at a time.
+let rng: () => number = Math.random;
+function mulberry32(seed: number): () => number {
+    return function () {
+        let t = (seed = (seed + 0x6d2b79f5) | 0);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
 // The four neighbour offsets: left, right, up, down. Reused all over the file
 // so we don't allocate the same tiny array on every loop iteration.
 const STEPS: ReadonlyArray<readonly [number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
@@ -132,7 +152,7 @@ function clearPathToEdge(grid: Grid, sx: number, sy: number, dx: number, dy: num
 function shuffle<T>(array: T[]): T[] {
     const copy = [...array];
     for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(rng() * (i + 1));
         [copy[i], copy[j]] = [copy[j], copy[i]];
     }
     return copy;
@@ -262,7 +282,7 @@ function pickWeightedDir(
 ): Direction {
     const weights = dirs.map(d => 1 / (1 + k * counts[d]));
     const total = weights.reduce((s, w) => s + w, 0);
-    let r = Math.random() * total;
+    let r = rng() * total;
     for (let i = 0; i < dirs.length; i++) {
         r -= weights[i];
         if (r <= 0) return dirs[i];
@@ -355,7 +375,7 @@ function generateArrow(
                        : nearbySameDir === 1 ? 0.5
                        : nearbySameDir === 2 ? 0.75
                        :                       0.9;
-        if (Math.random() < skipProb) return null;
+        if (rng() < skipProb) return null;
     }
 
     // STEP 5 — Pick a final exit direction using the weighted random pick.
@@ -375,7 +395,7 @@ function generateArrow(
 
     // Random body length between (minLen - 1) and (maxLen - 1). Subtracting 1
     // accounts for the head, which is already in the path.
-    const bodyLength = Math.floor(Math.random() * (maxLen - minLen)) + (minLen - 1);
+    const bodyLength = Math.floor(rng() * (maxLen - minLen)) + (minLen - 1);
 
     // STEP 7 — Grow the body one cell at a time.
     for (let i = 0; i < bodyLength; i++) {
@@ -404,9 +424,9 @@ function generateArrow(
             // wiggle instead of being a boring straight line.
             // We never turn on the very first body step (i > 0 guard), so the
             // arrow head + first cell always agree on direction.
-            if (i > 0 && Math.random() < changeDirChance && neighbors.length > 1) {
+            if (i > 0 && rng() < changeDirChance && neighbors.length > 1) {
                 const others = neighbors.filter(p => !(p.x === preferred.x && p.y === preferred.y));
-                next = others[Math.floor(Math.random() * others.length)];
+                next = others[Math.floor(rng() * others.length)];
             } else {
                 next = preferred;
             }
@@ -419,7 +439,7 @@ function generateArrow(
         } else {
             // Forced turn: preferred direction is blocked, but other empty
             // neighbours exist, so wander into a random one.
-            next = neighbors[Math.floor(Math.random() * neighbors.length)];
+            next = neighbors[Math.floor(rng() * neighbors.length)];
         }
 
         // 7d. Commit the step: update the direction tracker, advance the
@@ -633,7 +653,7 @@ function placeRescueArrow(
     if (grid[sy][sx] !== 'empty') return null;
     const possibleDirs = getExitDirs(grid, sx, sy, w, h);
     if (possibleDirs.length === 0) return null;
-    const exitDir = possibleDirs[Math.floor(Math.random() * possibleDirs.length)];
+    const exitDir = possibleDirs[Math.floor(rng() * possibleDirs.length)];
 
     grid[sy][sx] = 'occupied';
     const path: GridPos[] = [{ x: sx, y: sy }];
@@ -929,22 +949,31 @@ function fixSelfBlockedArrows(arrows: Arrow[], w: number, h: number): Arrow[] | 
 // ─────────────────────────────────────────────────────────────────────────
 const MAX_GEN_ATTEMPTS = 12;
 
-export function generateLevel(width = 9, height = 9): Level {
-    let last: Level | null = null;
-    for (let attempt = 0; attempt < MAX_GEN_ATTEMPTS; attempt++) {
-        const candidate = generateLevelOnce(width, height);
-        const fixed = fixSelfBlockedArrows(candidate.arrows, width, height);
-        if (fixed === null) { last = candidate; continue; }
-        if (!isPuzzleSolvable(fixed, width, height)) { last = { ...candidate, arrows: fixed }; continue; }
-        return { ...candidate, arrows: fixed };
+export function generateLevel(width = 9, height = 9, seed?: number): Level {
+    // Swap in a deterministic PRNG for the duration of a seeded call so
+    // any failure surfaced in a test is reproducible from one integer.
+    // Production callers omit `seed` → rng stays Math.random.
+    const prevRng = rng;
+    if (seed !== undefined) rng = mulberry32(seed);
+    try {
+        let last: Level | null = null;
+        for (let attempt = 0; attempt < MAX_GEN_ATTEMPTS; attempt++) {
+            const candidate = generateLevelOnce(width, height);
+            const fixed = fixSelfBlockedArrows(candidate.arrows, width, height);
+            if (fixed === null) { last = candidate; continue; }
+            if (!isPuzzleSolvable(fixed, width, height)) { last = { ...candidate, arrows: fixed }; continue; }
+            return { ...candidate, arrows: fixed };
+        }
+        // Shipped attempts always exist (last is set on every miss); fallback
+        // path is only reached when ALL attempts had unfixable geometry or
+        // unbreakable cycles — extremely rare in practice on shipped sizes.
+        if (typeof console !== 'undefined') {
+            console.warn(`[puzzleGenerator] exhausted ${MAX_GEN_ATTEMPTS} attempts on ${width}x${height} without a fully solvable level`);
+        }
+        return last!;
+    } finally {
+        rng = prevRng;
     }
-    // Shipped attempts always exist (last is set on every miss); fallback
-    // path is only reached when ALL attempts had unfixable geometry or
-    // unbreakable cycles — extremely rare in practice on shipped sizes.
-    if (typeof console !== 'undefined') {
-        console.warn(`[puzzleGenerator] exhausted ${MAX_GEN_ATTEMPTS} attempts on ${width}x${height} without a fully solvable level`);
-    }
-    return last!;
 }
 
 function generateLevelOnce(

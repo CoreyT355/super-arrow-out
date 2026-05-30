@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { generateLevel } from '$lib/utils/puzzleGenerator';
 	import { trapFocus } from '$lib/utils/trapFocus';
-	import { clampPan as clampPanPure, cellAt as cellAtPure } from '$lib/utils/gestures';
+	import { panZoom, type PanZoomState } from '$lib/actions/panZoom.svelte';
 	import { roundedPath, measurePath, buildFullRoute } from '$lib/utils/svgPath';
 	import { extPos, segPos, exitCellCount, checkBlocked } from '$lib/utils/snakeMath';
 	import { computeS, isFlashRed } from '$lib/utils/animTiming';
@@ -110,29 +110,30 @@
 	const vortexDone = $derived(!shouldPlayVortex || (vortexAnim !== null && vortexP >= 1));
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
+	// Pan/zoom gesture handling (touch + wheel + Apple Pencil) is encapsulated
+	// in `$lib/actions/panZoom.svelte`. This screen owns the reactive state
+	// object — the action mutates its transform fields, and the SVG viewBox
+	// reads them through the $derived aliases below.
 
-	const MIN_SCALE = 1;
-	const MAX_SCALE = 8;
+	const panZoomState: PanZoomState = $state({
+		scale: 1, panX: 0, panY: 0,
+		containerW: 0, containerH: 0,
+		didMove: false,
+	});
 
-	let scale = $state(1);
-	let panX  = $state(0);
-	let panY  = $state(0);
-	let containerW = $state(0);
-	let containerH = $state(0);
+	// $derived aliases keep template/handler call sites readable — they
+	// reference `scale`, `panX`, etc. just like the pre-refactor code did.
+	const scale      = $derived(panZoomState.scale);
+	const panX       = $derived(panZoomState.panX);
+	const panY       = $derived(panZoomState.panY);
+	const containerW = $derived(panZoomState.containerW);
+	const containerH = $derived(panZoomState.containerH);
 
-	// Non-reactive gesture tracking (mutated freely, never drives rendering directly)
-	let _node: HTMLElement | null = null;
-	let _activeT = new Map<number, { x: number; y: number }>();
-	let _panX0 = 0, _panY0 = 0, _t0 = { x: 0, y: 0 }, _didMove = false;
-	let _pinchD0 = 0, _pinchS0 = 1, _pinchPX0 = 0, _pinchPY0 = 0;
-	let _pinchMid = { x: 0, y: 0 };
-
-	function clampPan(px: number, py: number, s: number) {
-		if (!_node) return { x: px, y: py };
-		return clampPanPure(px, py, s, containerW, containerH);
+	function resetView() {
+		panZoomState.scale = 1;
+		panZoomState.panX  = 0;
+		panZoomState.panY  = 0;
 	}
-
-	function resetView() { scale = 1; panX = 0; panY = 0; }
 
 	const svgViewBox = $derived.by(() => {
 		if (!containerW || !containerH) return `-0.1 -0.1 ${W + 0.2} ${H + 0.2}`;
@@ -143,188 +144,17 @@
 		return `${vbX} ${vbY} ${vbW} ${vbH}`;
 	});
 
-	// iPad Safari fires TouchEvents AND PointerEvents for Apple Pencil contacts.
-	// Pencil input is handled exclusively through the pointer-event path
-	// (onPenDown/Move/Up below), so skip stylus touches here to avoid the
-	// same physical contact corrupting _activeT — without this, the pen's
-	// touch + pointer entries make _activeT.size jump to 2, triggering the
-	// pinch branch with _pinchD0 = 0 and zooming the board to max.
-	// touchType is a WebKit-specific property: 'direct' = finger, 'stylus' = pen.
-	function isStylusTouch(t: Touch): boolean {
-		return (t as Touch & { touchType?: string }).touchType === 'stylus';
-	}
-
-	function onTouchStart(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches)) {
-			if (isStylusTouch(t)) continue;
-			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
-		}
-
-		if (_activeT.size === 1) {
-			const [t] = _activeT.values();
-			_t0 = { ...t }; _panX0 = panX; _panY0 = panY; _didMove = false;
-		} else if (_activeT.size === 2) {
-			const [a, b] = _activeT.values();
-			const rect = _node!.getBoundingClientRect();
-			_pinchD0  = Math.hypot(b.x - a.x, b.y - a.y);
-			_pinchS0  = scale; _pinchPX0 = panX; _pinchPY0 = panY;
-			_pinchMid = { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top };
-		}
-	}
-
-	function onTouchMove(e: TouchEvent) {
-		// Skip stylus-only moves so we don't preventDefault on pen gestures
-		// the pointer-event path is handling.
-		const fingerTouches = Array.from(e.changedTouches).filter(t => !isStylusTouch(t));
-		if (fingerTouches.length === 0) return;
-		e.preventDefault(); // must be non-passive to work; see panZoomAction
-		for (const t of fingerTouches)
-			_activeT.set(t.identifier, { x: t.clientX, y: t.clientY });
-
-		if (_activeT.size === 1) {
-			const [t] = _activeT.values();
-			const dx = t.x - _t0.x, dy = t.y - _t0.y;
-			if (Math.hypot(dx, dy) > 4) _didMove = true;
-			if (_didMove) {
-				const c = clampPan(_panX0 + dx, _panY0 + dy, scale);
-				panX = c.x; panY = c.y;
-			}
-		} else if (_activeT.size >= 2) {
-			const [a, b] = _activeT.values();
-			const d = Math.hypot(b.x - a.x, b.y - a.y);
-			const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, _pinchS0 * d / _pinchD0));
-			const r = s / _pinchS0;
-			const c = clampPan(
-				_pinchMid.x - (_pinchMid.x - _pinchPX0) * r,
-				_pinchMid.y - (_pinchMid.y - _pinchPY0) * r,
-				s
-			);
-			scale = s; panX = c.x; panY = c.y;
-		}
-	}
-
-	function onTouchEnd(e: TouchEvent) {
-		for (const t of Array.from(e.changedTouches)) {
-			if (isStylusTouch(t)) continue;
-			_activeT.delete(t.identifier);
-		}
-
-		if (_activeT.size === 1) {
-			// Dropped to 1 finger — reset single-touch pan baseline
-			const [t] = _activeT.values();
-			_t0 = { ...t }; _panX0 = panX; _panY0 = panY; _didMove = false;
-		}
-		// Snap back to unzoomed if barely zoomed
-		if (_activeT.size === 0 && scale < 1.05) resetView();
-	}
-
-	// All pointer listeners go through the action so passive flags are explicit.
-	// touchmove must be non-passive to allow preventDefault() which stops the
-	// browser from claiming the gesture as a scroll before we can pan.
-	function panZoomAction(node: HTMLElement) {
-		_node = node;
-
-		const ro = new ResizeObserver(entries => {
-			const { width, height } = entries[0].contentRect;
-			containerW = width;
-			containerH = height;
-		});
-		ro.observe(node);
-
-		function onWheel(e: WheelEvent) {
-			e.preventDefault();
-			const rect = node.getBoundingClientRect();
-			const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-			const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-			const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
-			const r = s / scale;
-			const c = clampPan(mx - (mx - panX) * r, my - (my - panY) * r, s);
-			scale = s; panX = c.x; panY = c.y;
-		}
-
-		// ─── Apple Pencil (PointerEvent path) ──────────────────────────────
-		// Apple Pencil fires PointerEvents with pointerType='pen' that the
-		// touch handlers don't (and can't) see correctly. This block gives
-		// the pen its own pan + tap path. Listeners are attached via
-		// addEventListener (not Svelte event-attribute syntax) to avoid
-		// Svelte 5's event delegation, which conflicts with onclick when
-		// pointerup is also delegated on SVG elements.
-		const PEN_KEY = -1; // touch identifiers are always >= 0
-		const PEN_MOVE_THRESHOLD = 12; // px; lenient — pencil precision can
-		                               // trip the touch threshold (4) easily
-
-		// Coordinate-based hit-testing is more reliable than
-		// document.elementFromPoint for SVG content under transforms.
-		// Pure logic lives in $lib/utils/gestures so it can be unit-tested.
-		function cellAt(clientX: number, clientY: number): { x: number; y: number } | null {
-			return cellAtPure(clientX, clientY, node.getBoundingClientRect(),
-				containerW, containerH, panX, panY, scale, W, H);
-		}
-
-		function onPenDown(e: PointerEvent) {
-			if (e.pointerType !== 'pen') return;
-			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
-			_t0 = { x: e.clientX, y: e.clientY };
-			_panX0 = panX; _panY0 = panY; _didMove = false;
-			try { node.setPointerCapture(e.pointerId); } catch { /* not supported */ }
-		}
-
-		function onPenMove(e: PointerEvent) {
-			if (e.pointerType !== 'pen' || !_activeT.has(PEN_KEY)) return;
-			_activeT.set(PEN_KEY, { x: e.clientX, y: e.clientY });
-			const dx = e.clientX - _t0.x, dy = e.clientY - _t0.y;
-			if (Math.hypot(dx, dy) > PEN_MOVE_THRESHOLD) _didMove = true;
-			if (_didMove) {
-				e.preventDefault(); // suppress native scroll once we own the gesture
-				const c = clampPan(_panX0 + dx, _panY0 + dy, scale);
-				panX = c.x; panY = c.y;
+	// Pencil tap → arrow lookup. The action surfaces the cell under the pen
+	// at pointerup time (when the gesture wasn't a pan); we walk the arrows
+	// to find a match. Identical to the inline body the action replaced.
+	function onBoardTap(cell: GridPos) {
+		for (const arrow of level.arrows) {
+			if (removed.has(arrow.id)) continue;
+			if (arrow.path.some(p => p.x === cell.x && p.y === cell.y)) {
+				handleClick(arrow.id);
+				break;
 			}
 		}
-
-		function onPenUp(e: PointerEvent) {
-			if (e.pointerType !== 'pen' || !_activeT.has(PEN_KEY)) return;
-			_activeT.delete(PEN_KEY);
-			try { node.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-			if (_activeT.size === 0 && scale < 1.05) resetView();
-
-			if (e.type === 'pointerup' && !_didMove) {
-				const cell = cellAt(e.clientX, e.clientY);
-				if (!cell) return;
-				for (const arrow of level.arrows) {
-					if (removed.has(arrow.id)) continue;
-					if (arrow.path.some(p => p.x === cell.x && p.y === cell.y)) {
-						handleClick(arrow.id);
-						break;
-					}
-				}
-			}
-		}
-
-		node.addEventListener('touchstart',   onTouchStart, { passive: true  });
-		node.addEventListener('touchmove',    onTouchMove,  { passive: false }); // ← non-passive
-		node.addEventListener('touchend',     onTouchEnd,   { passive: true  });
-		node.addEventListener('touchcancel',  onTouchEnd,   { passive: true  });
-		node.addEventListener('wheel',        onWheel,      { passive: false });
-		node.addEventListener('pointerdown',  onPenDown, { passive: true  });
-		node.addEventListener('pointermove',  onPenMove, { passive: false }); // ← non-passive for preventDefault
-		node.addEventListener('pointerup',    onPenUp,   { passive: true  });
-		node.addEventListener('pointercancel', onPenUp,  { passive: true  });
-
-		return {
-			destroy() {
-				ro.disconnect();
-				node.removeEventListener('touchstart',   onTouchStart);
-				node.removeEventListener('touchmove',    onTouchMove);
-				node.removeEventListener('touchend',     onTouchEnd);
-				node.removeEventListener('touchcancel',  onTouchEnd);
-				node.removeEventListener('wheel',        onWheel);
-				node.removeEventListener('pointerdown',  onPenDown);
-				node.removeEventListener('pointermove',  onPenMove);
-				node.removeEventListener('pointerup',    onPenUp);
-				node.removeEventListener('pointercancel', onPenUp);
-				_node = null;
-			}
-		};
 	}
 
 	// roundedPath, easing, snake math, measurePath, buildFullRoute,
@@ -335,7 +165,7 @@
 	// ─── click handler ───────────────────────────────────────────────────────────
 
 	function handleClick(id: number) {
-		if (_didMove) return; // swallow taps that ended a pan gesture
+		if (panZoomState.didMove) return; // swallow taps that ended a pan gesture
 		if (won || lives <= 0) return; // game already decided
 		if (anims[id] || removed.has(id)) return;
 		const arrow = level.arrows.find(a => a.id === id);
@@ -1249,7 +1079,7 @@
 			<div
 				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem - env(safe-area-inset-top)) * {W / H})); aspect-ratio: {W} / {H};"
 				class="relative overflow-hidden rounded-xl touch-none"
-				use:panZoomAction
+				use:panZoom={{ state: panZoomState, gridW: W, gridH: H, onTap: onBoardTap }}
 			>
 				<svg
 					viewBox={svgViewBox}

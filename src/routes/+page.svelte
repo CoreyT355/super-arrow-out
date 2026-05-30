@@ -3,6 +3,7 @@
 	import { trapFocus } from '$lib/utils/trapFocus';
 	import { panZoom, type PanZoomState } from '$lib/actions/panZoom.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+	import Board from '$lib/components/Board.svelte';
 	import { roundedPath, measurePath, buildFullRoute } from '$lib/utils/svgPath';
 	import { extPos, segPos, exitCellCount, checkBlocked } from '$lib/utils/snakeMath';
 	import { computeS, isFlashRed } from '$lib/utils/animTiming';
@@ -91,13 +92,8 @@
 	// Used to call .getPointAtLength(...) for arrowhead positioning each frame.
 	let pathRefs = $state<Record<number, SVGPathElement | null>>({});
 
-	// 4-pointed sparkle star — cubic beziers pinch through (±0.08,±0.08) between each tip.
-	// Normalized to radius 1; scaled per-particle via SVG transform.
-	const SPARKLE_PATH =
-		'M 0 -1 C 0.08 -0.08 0.08 -0.08 1 0 C 0.08 0.08 0.08 0.08 0 1 ' +
-		'C -0.08 0.08 -0.08 0.08 -1 0 C -0.08 -0.08 -0.08 -0.08 0 -1 Z';
-
 	// Vortex collapse: plays when the player wins, before the win panel appears.
+	// The sparkle particle shape and SVG rendering live in <Board>.
 	interface Particle { r0: number; θ0: number; color: string; size: number; delay: number; rotation: number; speed: number }
 	let vortexAnim      = $state<{ startTime: number } | null>(null);
 	let vortexParticles = $state<Particle[]>([]);
@@ -111,24 +107,15 @@
 	const vortexDone = $derived(!shouldPlayVortex || (vortexAnim !== null && vortexP >= 1));
 
 	// ─── pan / zoom ──────────────────────────────────────────────────────────────
-	// Pan/zoom gesture handling (touch + wheel + Apple Pencil) is encapsulated
-	// in `$lib/actions/panZoom.svelte`. This screen owns the reactive state
-	// object — the action mutates its transform fields, and the SVG viewBox
-	// reads them through the $derived aliases below.
-
+	// Pan/zoom gesture handling lives in `$lib/actions/panZoom.svelte`.
+	// The screen owns this reactive state object so it can call resetView
+	// when starting a new puzzle; the <Board> threads it into the action
+	// and derives the SVG viewBox from it.
 	const panZoomState: PanZoomState = $state({
 		scale: 1, panX: 0, panY: 0,
 		containerW: 0, containerH: 0,
 		didMove: false,
 	});
-
-	// $derived aliases keep template/handler call sites readable — they
-	// reference `scale`, `panX`, etc. just like the pre-refactor code did.
-	const scale      = $derived(panZoomState.scale);
-	const panX       = $derived(panZoomState.panX);
-	const panY       = $derived(panZoomState.panY);
-	const containerW = $derived(panZoomState.containerW);
-	const containerH = $derived(panZoomState.containerH);
 
 	function resetView() {
 		panZoomState.scale = 1;
@@ -136,18 +123,9 @@
 		panZoomState.panY  = 0;
 	}
 
-	const svgViewBox = $derived.by(() => {
-		if (!containerW || !containerH) return `-0.1 -0.1 ${W + 0.2} ${H + 0.2}`;
-		const vbW = (W + 0.2) / scale;
-		const vbH = (H + 0.2) / scale;
-		const vbX = -panX * vbW / containerW - 0.1;
-		const vbY = -panY * vbH / containerH - 0.1;
-		return `${vbX} ${vbY} ${vbW} ${vbH}`;
-	});
-
-	// Pencil tap → arrow lookup. The action surfaces the cell under the pen
-	// at pointerup time (when the gesture wasn't a pan); we walk the arrows
-	// to find a match. Identical to the inline body the action replaced.
+	// Pencil tap → arrow lookup. The Board's panZoom action surfaces the
+	// cell under the pen at pointerup time (when the gesture wasn't a
+	// pan); we walk the arrows to find a match.
 	function onBoardTap(cell: GridPos) {
 		for (const arrow of level.arrows) {
 			if (removed.has(arrow.id)) continue;
@@ -913,176 +891,19 @@
 		-->
 		<div class="flex-1 min-h-0 flex items-center justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
 		     inert={menuOpen || won || lost}>
-			<div
-				style="width: min(calc(100vw - 1.5rem), calc((100dvh - 4.5rem - env(safe-area-inset-top)) * {W / H})); aspect-ratio: {W} / {H};"
-				class="relative overflow-hidden rounded-xl touch-none"
-				use:panZoom={{ state: panZoomState, gridW: W, gridH: H, onTap: onBoardTap }}
-			>
-				<svg
-					viewBox={svgViewBox}
-					preserveAspectRatio="none"
-					style="width:100%;height:100%;"
-					overflow="hidden"
-				>
-					<!-- Grid background: single SVG pattern — no per-cell rects needed.
-					     Rect covers exactly the grid area (0 0 W H) so the -0.1 viewBox
-					     border doesn't show partial tile slivers at the edges. -->
-					<defs>
-						<pattern id="cell-bg" x="0" y="0" width="1" height="1" patternUnits="userSpaceOnUse">
-							<rect x="0.06" y="0.06" width="0.88" height="0.88" rx="0.18"
-								fill={darkMode ? 'rgba(51,65,85,0.6)' : 'rgba(203,213,225,0.8)'} />
-						</pattern>
-					</defs>
-					{#if showGrid}
-						<rect x="0" y="0" width={W} height={H} fill="url(#cell-bg)" />
-					{/if}
-
-					<!-- Arrows: split static vs animating so RAF ticks only re-render
-					     the 1–2 arrows that are actively sliding. -->
-					{#each level.arrows as arrow (arrow.id)}
-						{#if !removed.has(arrow.id)}
-							{#if anims[arrow.id]}
-								{@const anim = anims[arrow.id]}
-								{#if anim.phase === 'exiting'}
-									<!-- Drain animation: snake-length dash slides along extended route via stroke-dashoffset -->
-									{@const el       = Math.max(0, now - anim.startTime)}
-									{@const p        = Math.min(1, el / (anim.durationMs ?? 1))}
-									{@const travel   = (anim.L_total ?? 0) - (anim.L_snake ?? 0)}
-									{@const offset   = -p * travel}
-									{@const headLen  = Math.min(anim.L_total ?? 0, (anim.L_snake ?? 0) + p * travel)}
-									{@const ref      = pathRefs[arrow.id]}
-									{@const headPt   = ref ? ref.getPointAtLength(headLen)
-									                       : { x: arrow.path[0].x + 0.5, y: arrow.path[0].y + 0.5 }}
-									{@const aheadPt  = ref ? ref.getPointAtLength(Math.min(anim.L_total ?? 0, headLen + 0.1))
-									                       : { x: headPt.x + DELTA[arrow.direction].dx, y: headPt.y + DELTA[arrow.direction].dy }}
-									{@const angle    = Math.atan2(aheadPt.y - headPt.y, aheadPt.x - headPt.x) * 180 / Math.PI}
-									{@const color    = themeColor(arrow.id)}
-									<g style="cursor:default;pointer-events:none" opacity={0.95}>
-										<path
-											bind:this={pathRefs[arrow.id]}
-											d={anim.routeD}
-											fill="none"
-											stroke={color}
-											stroke-width={0.14}
-											stroke-linecap="round"
-											stroke-linejoin={roundedCorners ? 'round' : 'miter'}
-											stroke-dasharray="{anim.L_snake} {anim.L_total}"
-											stroke-dashoffset={offset}
-										/>
-										<polygon
-											points="0.32,0 -0.16,-0.24 -0.16,0.24"
-											transform="translate({headPt.x},{headPt.y}) rotate({angle})"
-											fill={color}
-										/>
-									</g>
-								{:else}
-									<!-- Blocked phases: rigid-body nudge / bounce / flash -->
-									{@const d    = DELTA[arrow.direction]}
-									{@const el   = Math.max(0, now - anim.startTime)}
-									{@const s    = computeS(anim, el)}
-									{@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
-									{@const head = pts[0]}
-									{@const red  = isFlashRed(anim, el)}
-									{@const color = themeColor(arrow.id)}
-									<g style="cursor:default;pointer-events:none" opacity={0.95}>
-										<path
-											d={roundedPath(pts, roundedCorners ? 0.4 : 0)}
-											fill="none"
-											stroke={red ? '#ef4444' : color}
-											stroke-width={0.14}
-											stroke-linecap="round"
-											stroke-linejoin={roundedCorners ? 'round' : 'miter'}
-										/>
-										<polygon
-											points="0.32,0 -0.16,-0.24 -0.16,0.24"
-											transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-											fill={red ? '#ef4444' : color}
-										/>
-									</g>
-								{/if}
-							{:else}
-								<!-- Static branch: pre-computed paths, zero per-frame cost -->
-								{@const sd        = staticArrowData[arrow.id]}
-								{@const penalized = markedRed.has(arrow.id)}
-								{@const drawColor = penalized ? '#b91c1c' : themeColor(arrow.id)}
-								<g data-testid="arrow" data-arrow-id={arrow.id} onclick={() => handleClick(arrow.id)} style="cursor:pointer" opacity={0.95}>
-									{#each arrow.path as seg}
-										<rect x={seg.x} y={seg.y} width={1} height={1} fill="transparent" />
-									{/each}
-									<path
-										d={sd.d}
-										fill="none"
-										stroke={drawColor}
-										stroke-width={0.14}
-										stroke-linecap="round"
-										stroke-linejoin={roundedCorners ? 'round' : 'miter'}
-									/>
-									<polygon
-										points="0.32,0 -0.16,-0.24 -0.16,0.24"
-										transform="translate({sd.head.x + 0.5},{sd.head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-										fill={drawColor}
-									/>
-								</g>
-							{/if}
-						{/if}
-					{/each}
-
-				<!-- Vortex collapse — star particles spiral into the board centre on win -->
-				<!-- Phase 1 (0–600ms): stars fade in from nothing, static              -->
-				<!-- Phase 2 (600–2000ms): cubic ease-in spiral accelerating to centre  -->
-				{#if vortexAnim}
-					{@const elapsed = Math.max(0, now - vortexAnim.startTime)}
-					{@const bx = W / 2}
-					{@const by = H / 2}
-					<!-- Global spiral progress (0→1 over phase 2) drives the bg overlay -->
-					{@const spinElapsed = Math.max(0, elapsed - VORTEX_FADE_MS)}
-					{@const spinP  = Math.min(1, spinElapsed / VORTEX_SPIN_MS)}
-					{@const spinEP = spinP * spinP * spinP}
-					<!-- Fade the board colour over the grid lines as the spiral completes -->
-					<rect x="0" y="0" width={W} height={H}
-						fill={darkMode ? '#0f172a' : '#f1f5f9'}
-						opacity={spinEP} />
-					{#each vortexParticles as pt}
-						{@const lElapsed    = Math.max(0, elapsed - pt.delay)}
-						<!-- Phase 1: fade in linearly over VORTEX_FADE_MS -->
-						{@const fadeP       = Math.min(1, lElapsed / VORTEX_FADE_MS)}
-						<!-- Phase 2: cubic ease-in spiral — each particle has its own speed -->
-						{@const lSpinElapsed = Math.max(0, lElapsed - VORTEX_FADE_MS)}
-						{@const lSpinP      = Math.min(1, lSpinElapsed / (VORTEX_SPIN_MS * pt.speed))}
-						{@const lSpinEP     = lSpinP * lSpinP * lSpinP}
-						{@const r           = pt.r0 * (1 - lSpinEP)}
-						{@const θ           = pt.θ0 + lSpinEP * Math.PI * 4}
-						{@const pcx         = bx + r * Math.cos(θ)}
-						{@const pcy         = by + r * Math.sin(θ)}
-						<!-- Slow drift during fade-in, then spin with the vortex -->
-						{@const rot         = pt.rotation + fadeP * 20 + lSpinEP * 180}
-						<g
-							transform="translate({pcx},{pcy}) rotate({rot}) scale({pt.size})"
-							fill={pt.color}
-							opacity={fadeP * (1 - lSpinP * lSpinP)}
-						>
-							<path d={SPARKLE_PATH} />
-						</g>
-					{/each}
-				{/if}
-
-				</svg>
-
-				<!-- Loading screen -->
-				{#if showLoading}
-					<div
-						class="absolute inset-0 z-50 flex items-center justify-center {darkMode ? 'bg-slate-950/80' : 'bg-slate-300/80'} backdrop-blur-sm"
-						role="status"
-						aria-live="polite"
-					>
-						<div class="flex flex-col items-center gap-4 text-center">
-							<div class="w-12 h-12 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" aria-hidden="true"></div>
-							<p class="text-xl font-bold {darkMode ? 'text-white' : 'text-slate-900'}">Loading…</p>
-						</div>
-					</div>
-				{/if}
-
-			</div>
+			<Board
+				gridW={W} gridH={H}
+				{level} {removed} {markedRed} {anims} {now}
+				{darkMode} {showGrid} {roundedCorners}
+				{panZoomState}
+				{staticArrowData}
+				{themeColor}
+				{vortexAnim} {vortexParticles}
+				{pathRefs}
+				{showLoading}
+				onCellTap={onBoardTap}
+				onArrowClick={handleClick}
+			/>
 		</div>
 
 		<!-- Win panel — appears after the vortex collapse finishes -->

@@ -2,6 +2,7 @@
 	import { generateLevel } from '$lib/utils/puzzleGenerator';
 	import { trapFocus } from '$lib/utils/trapFocus';
 	import { panZoom, type PanZoomState } from '$lib/actions/panZoom.svelte';
+	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 	import { roundedPath, measurePath, buildFullRoute } from '$lib/utils/svgPath';
 	import { extPos, segPos, exitCellCount, checkBlocked } from '$lib/utils/snakeMath';
 	import { computeS, isFlashRed } from '$lib/utils/animTiming';
@@ -649,84 +650,7 @@
 					</button>
 				</div>
 
-				<!-- Dark Mode -->
-				<button
-					role="switch" aria-checked={darkMode}
-					onclick={() => (settings.darkMode = !settings.darkMode)}
-					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm flex items-center gap-2">
-						{#if darkMode}
-							<svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M11 8.5A5 5 0 0 1 4.5 2a5 5 0 1 0 6.5 6.5z"/>
-							</svg>
-						{:else}
-							<svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-								<circle cx="6.5" cy="6.5" r="2.2"/>
-								<line x1="6.5" y1="1" x2="6.5" y2="0.1"/><line x1="6.5" y1="12" x2="6.5" y2="12.9"/>
-								<line x1="1" y1="6.5" x2="0.1" y2="6.5"/><line x1="12" y1="6.5" x2="12.9" y2="6.5"/>
-								<line x1="2.9" y1="2.9" x2="2.2" y2="2.2"/><line x1="10.1" y1="10.1" x2="10.8" y2="10.8"/>
-								<line x1="10.1" y1="2.9" x2="10.8" y2="2.2"/><line x1="2.9" y1="10.1" x2="2.2" y2="10.8"/>
-							</svg>
-						{/if}
-						Dark Mode
-					</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {darkMode ? 'bg-emerald-500' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {darkMode ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
-
-				<!-- Show Grid -->
-				<button
-					role="switch" aria-checked={showGrid}
-					onclick={() => (settings.showGrid = !settings.showGrid)}
-					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Show Grid</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {showGrid ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {showGrid ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
-
-				<!-- Rounded Corners -->
-				<button
-					role="switch" aria-checked={roundedCorners}
-					onclick={() => (settings.roundedCorners = !settings.roundedCorners)}
-					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Rounded Corners</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {roundedCorners ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
-
-				<!-- Win Animation -->
-				<button
-					role="switch" aria-checked={winAnimation}
-					onclick={() => (settings.winAnimation = !settings.winAnimation)}
-					class="flex items-center justify-between w-full min-h-11 px-1 py-2 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-200' : 'text-slate-700'} text-sm">Win Animation</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
+				<SettingsPanel />
 
 				<!-- Divider -->
 				<div class="my-1 border-t {darkMode ? 'border-slate-700/60' : 'border-slate-200'}"></div>
@@ -976,94 +900,7 @@
 					</button>
 				</div>
 
-				<!-- Toggle: Dark Mode -->
-				<button
-					role="switch" aria-checked={darkMode}
-					onclick={() => (settings.darkMode = !settings.darkMode)}
-					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm flex items-center gap-1.5">
-						{#if darkMode}
-							<!-- Moon icon -->
-							<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M11 8.5A5 5 0 0 1 4.5 2a5 5 0 1 0 6.5 6.5z"/>
-							</svg>
-						{:else}
-							<!-- Sun icon -->
-							<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-								<circle cx="6.5" cy="6.5" r="2.2"/>
-								<line x1="6.5" y1="1" x2="6.5" y2="0.1"/>
-								<line x1="6.5" y1="12" x2="6.5" y2="12.9"/>
-								<line x1="1" y1="6.5" x2="0.1" y2="6.5"/>
-								<line x1="12" y1="6.5" x2="12.9" y2="6.5"/>
-								<line x1="2.9" y1="2.9" x2="2.2" y2="2.2"/>
-								<line x1="10.1" y1="10.1" x2="10.8" y2="10.8"/>
-								<line x1="10.1" y1="2.9" x2="10.8" y2="2.2"/>
-								<line x1="2.9" y1="10.1" x2="2.2" y2="10.8"/>
-							</svg>
-						{/if}
-						Dark Mode
-					</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {darkMode ? 'bg-emerald-500' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
-						             {darkMode ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
-
-				<!-- Toggle: Show Grid -->
-				<button
-					role="switch" aria-checked={showGrid}
-					onclick={() => (settings.showGrid = !settings.showGrid)}
-					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Show Grid</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {showGrid ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
-						             {showGrid ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
-
-				<!-- Toggle: Rounded Corners -->
-				<button
-					role="switch" aria-checked={roundedCorners}
-					onclick={() => (settings.roundedCorners = !settings.roundedCorners)}
-					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Rounded Corners</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {roundedCorners ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
-						             {roundedCorners ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
-
-				<!-- Toggle: Win Animation -->
-				<button
-					role="switch" aria-checked={winAnimation}
-					onclick={() => (settings.winAnimation = !settings.winAnimation)}
-					class="flex items-center justify-between w-full min-h-11 px-1 rounded-lg select-none transition-colors
-					       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-				>
-					<span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} text-sm">Win Animation</span>
-					<span
-						class="relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0
-						       {winAnimation ? 'bg-emerald-500' : darkMode ? 'bg-slate-600' : 'bg-slate-300'}"
-					>
-						<span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200
-						             {winAnimation ? 'translate-x-4' : 'translate-x-0'}"></span>
-					</span>
-				</button>
+				<SettingsPanel compact />
 			</div>
 		{/if}
 

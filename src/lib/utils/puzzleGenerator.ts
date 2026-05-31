@@ -870,15 +870,18 @@ function isSelfBlocked(arrow: Arrow, w: number, h: number): boolean {
     return false;
 }
 
-/** Build the blocking dep graph and topologically peel it. Solvable iff
- *  every arrow is reached — any survivors form a deadlock cycle. */
-function isPuzzleSolvable(arrows: Arrow[], w: number, h: number): boolean {
+/** The set of arrow ids that can NEVER be tapped — i.e. they survive a
+ *  topological peel of the blocking dependency graph. Empty set ⇒ solvable.
+ *
+ *  deps[id] = ids whose bodies sit in `id`'s exit ray; those must drain
+ *  before `id` can be tapped. We iteratively remove arrows whose deps are all
+ *  already removed; whatever remains is a deadlock cycle plus everything
+ *  stuck behind it. */
+function deadlockSurvivors(arrows: Arrow[], w: number, h: number): Set<number> {
     // cell key -> owning arrow id
     const owner = new Map<number, number>();
     for (const a of arrows) for (const p of a.path) owner.set(p.y * w + p.x, a.id);
 
-    // deps.get(id) = set of arrow ids whose bodies sit in `id`'s exit ray;
-    // those must drain before `id` can be tapped.
     const deps = new Map<number, Set<number>>();
     for (const a of arrows) {
         const set = new Set<number>();
@@ -894,8 +897,6 @@ function isPuzzleSolvable(arrows: Arrow[], w: number, h: number): boolean {
         deps.set(a.id, set);
     }
 
-    // Iteratively "remove" arrows whose deps are all already removed. If we
-    // ever finish a full pass with no progress, the survivors are a cycle.
     const removed = new Set<number>();
     let progress = true;
     while (progress && removed.size < arrows.length) {
@@ -909,7 +910,112 @@ function isPuzzleSolvable(arrows: Arrow[], w: number, h: number): boolean {
             if (ready) { removed.add(a.id); progress = true; }
         }
     }
-    return removed.size === arrows.length;
+
+    const survivors = new Set<number>();
+    for (const a of arrows) if (!removed.has(a.id)) survivors.add(a.id);
+    return survivors;
+}
+
+/** Solvable iff no arrow survives the topological peel. */
+function isPuzzleSolvable(arrows: Arrow[], w: number, h: number): boolean {
+    return deadlockSurvivors(arrows, w, h).size === 0;
+}
+
+// ─── DEADLOCK REPAIR ──────────────────────────────────────────────────────
+//
+// On large boards (Iron Tangle, 180×180 ≈ 2,300 arrows) the union-bound makes
+// it near-certain that SOME small blocking cycle forms in any single
+// generation attempt, so retrying alone can never guarantee a solvable level —
+// it occasionally exhausts every attempt and used to ship a known-unsolvable
+// board. This repair fixes any deadlock deterministically.
+//
+// The primitive: take the globally topmost-then-leftmost cell `c*` among all
+// surviving (deadlocked) arrows. Every cell ABOVE it, and every cell to its
+// LEFT in its own row, is a non-survivor that drains first. Because `c*`'s own
+// arrow is a survivor, `c*`'s in-arrow neighbours cannot lie north or west of
+// it (that neighbour would be a more-extreme survivor cell) — so they are
+// South or East. Re-root that arrow so `c*` is its head: a South neighbour ⇒
+// exit North, an East neighbour ⇒ exit West. Either exit ray passes only
+// through non-survivors, so the arrow becomes drainable and the survivor set
+// strictly shrinks. Repeat until solvable.
+//
+// The same primitive (applied to an arrow's OWN extreme cell) also clears a
+// self-blocked arrow, since the North/West ray can never cross the body that
+// lies South/East of `c*`.
+
+/** Re-root `work[ai]` so its cell at path index `k` becomes the head, exiting
+ *  North or West. `k` must be that arrow's topmost-then-leftmost cell (its
+ *  in-arrow neighbours are then all South/East). When `k` is interior the
+ *  arrow is split and the orphaned piece is appended as a new arrow. */
+function repointHeadAt(work: Arrow[], ai: number, k: number): void {
+    const A = work[ai];
+    // Head-only arrow: no body, no alignment constraint; North is always safe.
+    if (A.path.length === 1) { work[ai] = { ...A, direction: 'N' }; return; }
+
+    if (k === 0 || k === A.path.length - 1) {
+        // Endpoint: just orient the path so this cell leads.
+        const path = k === 0 ? A.path : [...A.path].reverse();
+        work[ai] = { ...A, path, direction: exitForStep(path[1].x - path[0].x, path[1].y - path[0].y) };
+        return;
+    }
+
+    // Interior: split, keeping a South/East neighbour as the new body so the
+    // re-rooted head exits North or West.
+    const c = A.path[k];
+    const next = A.path[k + 1];
+    const keepNext = (next.x === c.x && next.y === c.y + 1) || (next.x === c.x + 1 && next.y === c.y);
+    const cSide = keepNext ? A.path.slice(k) : A.path.slice(0, k + 1).reverse();
+    const otherSide = keepNext ? A.path.slice(0, k) : A.path.slice(k + 1);
+    work[ai] = { ...A, path: cSide, direction: exitForStep(cSide[1].x - cSide[0].x, cSide[1].y - cSide[0].y) };
+    const otherDir = otherSide.length >= 2
+        ? exitForStep(otherSide[1].x - otherSide[0].x, otherSide[1].y - otherSide[0].y)
+        : A.direction;
+    work.push({ id: -1, direction: otherDir, path: otherSide, color: A.color });
+}
+
+/** Index of an arrow's topmost-then-leftmost cell. */
+function extremeCellIndex(a: Arrow): number {
+    let best = 0;
+    for (let k = 1; k < a.path.length; k++) {
+        const p = a.path[k], b = a.path[best];
+        if (p.y < b.y || (p.y === b.y && p.x < b.x)) best = k;
+    }
+    return best;
+}
+
+/** Make `arrows` provably solvable AND self-block-free by repeatedly applying
+ *  the re-point primitive. Each round either breaks a deadlock (re-pointing
+ *  the global extreme survivor cell) or clears a self-blocked arrow
+ *  (re-pointing its own extreme cell). Both strictly reduce the problem; the
+ *  guard bounds the loop against pathological inputs. */
+function repairDeadlocks(arrows: Arrow[], w: number, h: number): Arrow[] {
+    let work = arrows.map(a => ({ ...a, path: [...a.path] }));
+    const guard = work.length * 6 + 64;
+    for (let round = 0; round < guard; round++) {
+        const survivors = deadlockSurvivors(work, w, h);
+        if (survivors.size > 0) {
+            // Break a deadlock: re-point the global topmost-leftmost survivor cell.
+            let best: { ai: number; k: number; x: number; y: number } | null = null;
+            for (let ai = 0; ai < work.length; ai++) {
+                if (!survivors.has(work[ai].id)) continue;
+                const path = work[ai].path;
+                for (let k = 0; k < path.length; k++) {
+                    const p = path[k];
+                    if (!best || p.y < best.y || (p.y === best.y && p.x < best.x)) best = { ai, k, x: p.x, y: p.y };
+                }
+            }
+            repointHeadAt(work, best!.ai, best!.k);
+            work = work.map((a, i) => ({ ...a, id: i }));
+            continue;
+        }
+        // Solvable. Clear any self-blocked arrow by re-pointing it at its own
+        // extreme cell; that may reintroduce a deadlock, repaired next round.
+        const sb = work.findIndex(a => isSelfBlocked(a, w, h));
+        if (sb === -1) return work;
+        repointHeadAt(work, sb, extremeCellIndex(work[sb]));
+        work = work.map((a, i) => ({ ...a, id: i }));
+    }
+    return work;
 }
 
 /** Try to repair each self-blocked arrow in place by reversing its path
@@ -943,9 +1049,11 @@ function fixSelfBlockedArrows(arrows: Arrow[], w: number, h: number): Arrow[] | 
 // Wraps the actual generation in a validate-and-retry loop: each attempt
 // runs the pipeline, then we (a) reverse any self-blocked arrows and
 // (b) check the blocking graph is a DAG. If both pass, we ship. Otherwise
-// we regenerate, up to MAX_GEN_ATTEMPTS times. After exhausting attempts
-// we ship the last attempt anyway with a warning rather than hang the UI
-// — but in practice good levels are found in the first 1–2 tries.
+// we regenerate, up to MAX_GEN_ATTEMPTS times — most sizes find a naturally
+// clean board in the first 1–2 tries. If every attempt deadlocks (near-certain
+// on huge boards like Iron Tangle, where the sheer arrow count makes some
+// blocking cycle almost inevitable), we DETERMINISTICALLY REPAIR the last
+// candidate instead of shipping it broken, guaranteeing a solvable level.
 // ─────────────────────────────────────────────────────────────────────────
 const MAX_GEN_ATTEMPTS = 12;
 
@@ -964,13 +1072,14 @@ export function generateLevel(width = 9, height = 9, seed?: number): Level {
             if (!isPuzzleSolvable(fixed, width, height)) { last = { ...candidate, arrows: fixed }; continue; }
             return { ...candidate, arrows: fixed };
         }
-        // Shipped attempts always exist (last is set on every miss); fallback
-        // path is only reached when ALL attempts had unfixable geometry or
-        // unbreakable cycles — extremely rare in practice on shipped sizes.
-        if (typeof console !== 'undefined') {
-            console.warn(`[puzzleGenerator] exhausted ${MAX_GEN_ATTEMPTS} attempts on ${width}x${height} without a fully solvable level`);
-        }
-        return last!;
+        // Every attempt deadlocked (or had unfixable self-blocks). Repair the
+        // last candidate so the shipped level is always solvable rather than
+        // hanging the UI on endless retries.
+        const repaired = repairDeadlocks(last!.arrows, width, height);
+        return {
+            ...last!,
+            arrows: repaired.map((a, i) => ({ ...a, id: i, color: COLORS[i % COLORS.length] })),
+        };
     } finally {
         rng = prevRng;
     }

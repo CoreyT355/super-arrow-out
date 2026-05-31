@@ -7,7 +7,7 @@
     import { settings } from '$lib/stores/settings.svelte';
     import { progress as progressStore } from '$lib/stores/progress.svelte';
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
-    import { ENABLED_DIFFICULTIES } from '$lib/config/difficulties';
+    import { visibleDifficulties } from '$lib/config/difficulties';
 
     // Start screen. Owns its own little menuSettingsOpen overlay; everything
     // else (Resume card, difficulty buttons, Stats link) just emits.
@@ -23,6 +23,10 @@
     const darkMode    = $derived(settings.darkMode);
     const progress    = $derived(progressStore.wins);
     const resumeState = $derived(resumeStore.data);
+
+    // Difficulty list reacts to progress so secret entries (The Iron Tangle)
+    // appear as soon as their unlock condition (a Ludicrous win) is met.
+    const difficulties = $derived(visibleDifficulties(progress));
 
     let menuSettingsOpen = $state(false);
 </script>
@@ -58,7 +62,7 @@
                     <ResumeCard resume={resumeState} onResume={onResume} />
                 {/if}
 
-                {#each ENABLED_DIFFICULTIES as d}
+                {#each difficulties as d}
                     <DifficultyButton
                         difficulty={d}
                         wins={progress[d.label] ?? 0}

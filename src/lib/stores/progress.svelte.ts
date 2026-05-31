@@ -47,3 +47,24 @@ if (typeof window !== 'undefined') {
         $effect(() => { saveJSON(STREAK_KEY, progress.streak); });
     });
 }
+
+// Dev-only console helpers for exercising win-gated content (e.g. the secret
+// Iron Tangle, which unlocks after a Ludicrous win). Assigning to
+// `progress.wins` runs through the reactive graph, so the menu updates live —
+// no reload needed. `import.meta.env.DEV` is statically false in a production
+// build, so this whole block is tree-shaken out of the shipped bundle.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const w = window as typeof window & {
+        addWin:      (label: string, n?: number) => void;
+        resetWins:   () => void;
+    };
+    w.addWin = (label, n = 1) => {
+        progress.wins = { ...progress.wins, [label]: (progress.wins[label] ?? 0) + n };
+        console.log(`[dev] ${label} wins → ${progress.wins[label]}`);
+    };
+    w.resetWins = () => {
+        progress.wins = {};
+        console.log('[dev] wins cleared');
+    };
+    console.log('[dev] progress helpers ready: addWin("Ludicrous"), resetWins()');
+}

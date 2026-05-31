@@ -1,11 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { clampPan, cellAt } from './gestures';
+import { clampPan, cellAt, maxScaleFor, MIN_MAX_SCALE } from './gestures';
 
 const CONTAINER_W = 400;
 const CONTAINER_H = 600;
 const W = 10; // grid width in cells
 const H = 15; // grid height in cells
 const RECT = { left: 0, top: 0 };
+
+describe('maxScaleFor', () => {
+	it('floors small grids at MIN_MAX_SCALE instead of removing zoom', () => {
+		// Easy 6×6 and Normal 9×9 are at/below the 8-cell target window, so
+		// the formula (min/8 = 0.75 and 1.125) is overridden by the floor.
+		expect(maxScaleFor(6, 6)).toBe(MIN_MAX_SCALE);
+		expect(maxScaleFor(9, 9)).toBe(MIN_MAX_SCALE);
+	});
+
+	it('scales with grid size so max zoom shows ~8 cells across', () => {
+		// Big grids zoom far enough to reach the standard cell size.
+		expect(maxScaleFor(180, 180)).toBeCloseTo(22.5); // Iron Tangle (was capped at 8)
+		expect(maxScaleFor(64, 64)).toBe(8);             // Expert-ish
+	});
+
+	it('uses the shorter axis on lopsided grids, not the width', () => {
+		// 200×32 → driven by 32 (the shorter side): 32/8 = 4, not 200/8 = 25.
+		expect(maxScaleFor(200, 32)).toBe(4);
+		expect(maxScaleFor(32, 200)).toBe(4); // orientation-independent
+	});
+});
 
 describe('clampPan', () => {
 	it('forces pan to (0, 0) at scale 1 (no zoom)', () => {

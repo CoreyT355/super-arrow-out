@@ -11,7 +11,11 @@
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<meta name="apple-mobile-web-app-title" content="Arrow Out" />
-		<link rel="apple-touch-icon" href="/icon-192.png" />
+		<!-- Versioned filename (.v2) busts CDN/HTTP caches so NEW home-screen
+		     installs pick up the current icon. Note: iOS never re-reads this
+		     for an already-saved shortcut — existing installs keep the old
+		     icon until the user removes and re-adds the site. -->
+		<link rel="apple-touch-icon" href="/icon-192.v2.png" />
 
 		<!-- Theme colour for Android Chrome's browser chrome -->
 		<meta name="theme-color" content="#0f172a" />

@@ -1,5 +1,5 @@
 import type { GridPos } from '$lib/types';
-import { clampPan as clampPanPure, cellAt as cellAtPure } from '$lib/utils/gestures';
+import { clampPan as clampPanPure, cellAt as cellAtPure, maxScaleFor } from '$lib/utils/gestures';
 
 // Pan / zoom Svelte action for the SVG board.
 //
@@ -33,7 +33,8 @@ export interface PanZoomParams {
 }
 
 const MIN_SCALE = 1;
-const MAX_SCALE = 8;
+// MAX scale is derived per-grid via maxScaleFor(gridW, gridH) so every
+// difficulty zooms in to the same on-screen cell size (see gestures.ts).
 
 // Pencil pan-vs-tap classification.
 // touch-event identifiers are always >= 0, so -1 is a safe slot for pen.
@@ -138,7 +139,7 @@ export function panZoom(node: HTMLElement, params: PanZoomParams) {
         } else if (activeT.size >= 2) {
             const [a, b] = activeT.values();
             const d = Math.hypot(b.x - a.x, b.y - a.y);
-            const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, pinchS0 * d / pinchD0));
+            const s = Math.min(maxScaleFor(gridW, gridH), Math.max(MIN_SCALE, pinchS0 * d / pinchD0));
             const r = s / pinchS0;
             const c = clampPan(
                 pinchMid.x - (pinchMid.x - pinchPX0) * r,
@@ -175,7 +176,7 @@ export function panZoom(node: HTMLElement, params: PanZoomParams) {
         const rect = node.getBoundingClientRect();
         const mx = e.clientX - rect.left, my = e.clientY - rect.top;
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, state.scale * factor));
+        const s = Math.min(maxScaleFor(gridW, gridH), Math.max(MIN_SCALE, state.scale * factor));
         const r = s / state.scale;
         const c = clampPan(mx - (mx - state.panX) * r, my - (my - state.panY) * r, s);
         state.scale = s;

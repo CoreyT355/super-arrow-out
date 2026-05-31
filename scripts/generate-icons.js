@@ -1,15 +1,23 @@
 #!/usr/bin/env node
 /**
- * Generates static/icon-192.png and static/icon-512.png
+ * Generates static/icon-192.<VERSION>.png and static/icon-512.<VERSION>.png
  * using only built-in Node.js modules (no canvas / sharp needed).
  *
  * Run once after cloning:  node scripts/generate-icons.js
+ *
+ * ICON_VERSION is part of the filename so that changing the artwork forces a
+ * brand-new URL — the only reliable way to bust home-screen / CDN icon caches.
+ * When you change the icon, bump ICON_VERSION here and update the matching
+ * filenames in static/manifest.webmanifest and src/app.html (apple-touch-icon),
+ * then delete the previous static/icon-*.<oldVersion>.* files.
  */
 
 import { deflateSync } from 'zlib';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+
+const ICON_VERSION = 'v2';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, '../static');
@@ -199,7 +207,7 @@ function drawIcon(size) {
 for (const size of [192, 512]) {
   const rgba = drawIcon(size);
   const png  = encodePNG(size, size, rgba);
-  const out  = join(OUT, `icon-${size}.png`);
+  const out  = join(OUT, `icon-${size}.${ICON_VERSION}.png`);
   writeFileSync(out, png);
   console.log(`wrote ${out} (${png.length} bytes)`);
 }

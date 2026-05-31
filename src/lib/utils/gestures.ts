@@ -6,6 +6,33 @@ export interface Rect {
 	top: number;
 }
 
+// ─── zoom bounds ───────────────────────────────────────────────────────────
+//
+// `scale` is relative to "fit": at scale 1 the whole grid fills the container,
+// and at scale s the view shows `gridDim / s` cells across that dimension. A
+// fixed max scale therefore zooms every difficulty to a DIFFERENT cell size —
+// tiny grids blow a single cell up to fill the screen, while huge grids
+// (Iron Tangle, 180×180) bottom out far too zoomed-out to tap a cell.
+//
+// Instead we cap zoom by a target number of visible cells, so max zoom reaches
+// the same on-screen cell size on every difficulty.
+
+/** Cells visible across the shorter board axis when fully zoomed in. */
+export const MAX_ZOOM_CELLS_ACROSS = 8;
+/** Floor on the max scale so small grids (already ≤ the target window) still
+ *  get a closer-inspection zoom instead of none. */
+export const MIN_MAX_SCALE = 2;
+
+/**
+ * Maximum zoom scale for a grid, scaled so that fully zooming in always shows
+ * `MAX_ZOOM_CELLS_ACROSS` cells along the shorter axis — a consistent cell
+ * size across every difficulty. Floored at `MIN_MAX_SCALE` for grids already
+ * smaller than the target window.
+ */
+export function maxScaleFor(gridW: number, gridH: number): number {
+	return Math.max(MIN_MAX_SCALE, Math.min(gridW, gridH) / MAX_ZOOM_CELLS_ACROSS);
+}
+
 /**
  * Clamps a proposed pan offset so the scaled content can't be dragged past
  * the container edges. When scale <= 1 the content fits exactly and pan is

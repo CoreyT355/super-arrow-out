@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { tick } from 'svelte';
+    import { tick, onMount } from 'svelte';
     import { fly } from 'svelte/transition';
     import type { GridPos, Level, Anim } from '$lib/types';
 
@@ -203,11 +203,16 @@
     }
 
     // ─── boot: process the start request ────────────────────────────────────
-    // Runs once on mount. New games go through the worker (so the loading
-    // overlay actually paints first); resumes load synchronously from the
-    // store. Either path ends with `showLoading = false` and a valid level.
-    $effect(() => {
-        let cancelled = false;
+    //
+    // Runs once after mount. Critically NOT a $effect — the boot reads
+    // `resumeStore.data`/`puzzle` and writes `removed`, while the auto-save
+    // effect below reads `removed` and writes `resumeStore.data`. As an
+    // effect those two form a tracked cycle that Svelte aborts after a few
+    // iterations, leaving the UI in a half-restored, unclickable state.
+    // `onMount` is fire-once and outside the reactive graph, which breaks
+    // the cycle cleanly.
+    let cancelled = false;
+    onMount(() => {
         (async () => {
             if (request.kind === 'resume') {
                 const r = resumeStore.data;

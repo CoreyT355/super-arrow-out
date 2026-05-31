@@ -1,182 +1,89 @@
-# Tech Stack Setup — Arrow Out
+# Tech Stack — Arrow Out
+
+> Current-state reference for the shipped game. For the original design blueprint
+> (8×8 / 12-arrow prototype, backward-trajectory generation) see the historical
+> doc at `.claude/.plans/overview.md` — it predates most of what's below.
 
 ## Stack
 
-| Layer | Tool | Version Constraint |
+| Layer | Tool | Installed |
 |---|---|---|
-| Runtime | Node.js | `>=22` (engine-strict enforced via `.npmrc`) |
+| Runtime | Node.js | `>=22` (engine-strict via `.npmrc`; dev on v22.14) |
 | Package Manager | pnpm | `>=10` |
-| Framework | SvelteKit | `^2.x` |
-| UI Library | Svelte | `^5.x` (Runes mode) |
-| Bundler | Vite | `^6.x` (bundled with SvelteKit) |
-| Styling | Tailwind CSS | `^4.x` |
-| Tailwind Svelte plugin | `@tailwindcss/vite` | `^4.x` |
-| Language | TypeScript | `^5.x` |
-| Type checking | `svelte-check` | `^4.x` |
+| Framework | SvelteKit | `^2.57` |
+| UI Library | Svelte | `^5.55` (Runes mode, forced in `svelte.config.js`) |
+| Bundler | Vite | `^8.0.7` |
+| Tailwind Vite plugin | `@tailwindcss/vite` | `^4.2.2` |
+| Styling | Tailwind CSS | `^4.2.2` (CSS-first config — no `tailwind.config.js`) |
+| Language | TypeScript | `^6.0.2` |
+| Type checking | `svelte-check` | `^4.4.6` |
+| Unit tests | Vitest | `^4.1.7` |
+| E2E tests | Playwright | `^1.60` |
+| Adapter | `@sveltejs/adapter-auto` | `^7.0.1` |
+| Analytics | `@vercel/analytics` | `^2.0.1` |
+
+Hosted at https://arrows.coreytess.dev (Vercel).
 
 ---
 
-## Current State
-
-The `.svelte-kit/` directory and `.npmrc` exist, meaning the repo was cloned or partially scaffolded. **There is no `package.json` yet.** The full scaffold must be run before any dev work can begin.
-
----
-
-## Setup Todos
-
-### 1. Scaffold the SvelteKit project
-
-Run this from the repo root. When the Svelte CLI prompts, choose:
-- **Template:** SvelteKit minimal (Skeleton project)
-- **TypeScript:** Yes — use TypeScript syntax
-- **Add-ons:** none needed at scaffold time (Tailwind is added separately below)
+## Scripts
 
 ```bash
-pnpm create svelte@latest .
-```
-
-> If the CLI warns that the directory is non-empty, confirm you want to continue. It will not overwrite `.claude/` or `.gitignore`.
-
-### 2. Install dependencies
-
-```bash
-pnpm install
-```
-
-### 3. Add Tailwind CSS v4
-
-Tailwind v4 ships as a Vite plugin — there is no `tailwind.config` file by default. Install it and the Svelte-specific adapter:
-
-```bash
-pnpm add -D tailwindcss @tailwindcss/vite
-```
-
-Then register the plugin in `vite.config.ts`:
-
-```ts
-import { sveltekit } from '@sveltejs/kit/vite';
-import tailwindcss from '@tailwindcss/vite';
-import { defineConfig } from 'vite';
-
-export default defineConfig({
-  plugins: [tailwindcss(), sveltekit()],
-});
-```
-
-Import Tailwind in your global CSS entry (`src/app.css`):
-
-```css
-@import 'tailwindcss';
-```
-
-Then import that file in `src/routes/+layout.svelte`:
-
-```svelte
-<script>
-  import '../app.css';
-  let { children } = $props();
-</script>
-
-{@render children()}
-```
-
-### 4. Add the custom shake animation
-
-Tailwind v4 uses CSS-first configuration. Add the keyframe directly in `src/app.css` instead of a JS config file:
-
-```css
-@import 'tailwindcss';
-
-@theme {
-  --animate-shake: shake 0.25s ease-in-out;
-
-  @keyframes shake {
-    0%, 100% { transform: translateX(0); }
-    20%, 60% { transform: translateX(-4px); }
-    40%, 80% { transform: translateX(4px); }
-  }
-}
-```
-
-This makes `animate-shake` available as a utility class everywhere.
-
-### 5. Create the type definitions file
-
-```bash
-mkdir -p src/lib
-```
-
-Create `src/lib/types.ts`:
-
-```ts
-export type Direction = 'N' | 'S' | 'E' | 'W';
-
-export interface Point {
-  x: number;
-  y: number;
-}
-
-export interface ArrowData {
-  id: string;
-  points: Point[];
-  exitDirection: Direction;
-  color: string;
-  isExiting: boolean;
-  isBlocked: boolean;
-}
-
-export interface GameLevel {
-  gridSize: number;
-  arrows: ArrowData[];
-}
-```
-
-### 6. Create the puzzle generator utility
-
-```bash
-mkdir -p src/lib/utils
-```
-
-Place the full `generateLevel`, `tryGenerateArrow`, `validateLevel`, and `checkCollision` implementations in `src/lib/utils/puzzleGenerator.ts`. Source: `.claude/.plans/overview.md` § 5.
-
-### 7. Implement the game page
-
-Replace the scaffolded `src/routes/+page.svelte` with the full game component from `.claude/.plans/overview.md` § 5.
-
-> **Note on `{#get}` syntax:** The plan uses `{#get head = ...}` which is a Svelte 5 snippet/let shorthand. Verify the exact Svelte 5 block syntax for destructuring in the installed version — it may need to be `{@const head = ...}` instead.
-
-### 8. Verify the build
-
-```bash
-pnpm run check      # svelte-check type pass
-pnpm run dev        # local dev server at http://localhost:5173
-pnpm run build      # production build
+pnpm dev            # vite dev — http://localhost:5173
+pnpm build          # production build
+pnpm preview        # preview the production build
+pnpm check          # svelte-kit sync && svelte-check
+pnpm test           # vitest run (unit; excludes tests/e2e/)
+pnpm test:e2e       # playwright test
+pnpm test:e2e:ui    # playwright test --ui
 ```
 
 ---
 
 ## Implementation Notes
 
-### Why pnpm
-`.npmrc` sets `engine-strict=true`, which npm handles less gracefully than pnpm when Node version constraints are enforced. Stick with pnpm throughout.
-
 ### Svelte 5 Runes
-All reactive state uses the Runes API (`$state`, `$effect`, `$props`). Do **not** use legacy `let` + reactive labels (`$:`) — they are deprecated in Svelte 5 and mix poorly with Runes in the same component.
+All reactive state uses the Runes API (`$state`, `$effect`, `$props`, `$derived`).
+Runes mode is forced for project files via `compilerOptions.runes` in
+`svelte.config.js` (libraries under `node_modules` are exempt). Do **not** use
+legacy `let` + reactive labels (`$:`).
+
+Cross-component state lives in `src/lib/stores/*.svelte.ts` (settings, progress,
+resume) — plain modules exporting rune-backed state, not Svelte 4 stores.
+
+### Inline block destructuring
+Where the old blueprint used the invalid `{#get ...}` syntax, the real code uses
+`{@const ...}` inside `{#each}` blocks (see `lib/components/Board.svelte`).
+
+### Tailwind v4 (CSS-first)
+- No `tailwind.config.js`. Configuration lives in CSS via `@theme {}` in
+  `src/routes/layout.css`.
+- `@tailwindcss/vite` is registered in `vite.config.ts`; it replaces the old
+  PostCSS setup and auto-detects content from Vite.
+- The shake animation is defined as `--animate-shake` + a `@keyframes shake`
+  block inside `@theme`, exposing `animate-shake` as a utility.
+- Arbitrary values like `stroke-[0.25]` still work.
+
+### Reduced motion
+`@media (prefers-reduced-motion: reduce)` in `layout.css` suppresses the shake
+(and the win vortex / nudge) while leaving core drain animations running.
 
 ### SVG coordinate system
-The game board renders as a single SVG with `viewBox="0 0 {GRID_SIZE} {GRID_SIZE}"`. All arrow coordinates are in grid units (each cell = 1 unit). Centering within a cell uses `+ 0.5` offsets. The stroke width (`stroke-[0.25]`) is also in grid units — do not use pixel values here.
+The board renders as inline SVG with the viewBox in grid units (each cell = 1
+unit). Centering within a cell uses `+ 0.5` offsets; stroke width is in grid
+units, not pixels. No canvas anywhere.
 
-### Pointer event layering
-Each arrow is wrapped in a full-board `<button>` (absolute, inset-0). The SVG itself is `pointer-events-none`; only the `<path>` and `<polygon>` elements inside set `pointer-events-auto`. This prevents bounding-box overlap between arrows from swallowing clicks.
+### Off-thread generation
+Puzzle generation runs in a Web Worker (`lib/workers/puzzleGenerator.worker.ts`)
+via a promise-based bridge (`workerBridge.ts`) so the UI stays responsive on the
+large grids (up to 128×128, plus the hidden 32400-cell Iron Tangle).
 
-### Exit animation direction mapping
-The `exitDirection` on each arrow is the direction the **head** faces (the direction it exits). The generation algorithm seeds arrows entering from the opposite edge, so `exitDirection === startEdge` is correct — an arrow entering from the North edge exits North.
+### Persistence
+Progress, settings, and the resumable puzzle blob persist to `localStorage`
+through an SSR-safe wrapper (`lib/utils/persisted.ts`) — guards `window` so the
+server render doesn't touch storage.
 
-### Level generation failure budget
-`generateLevel` retries up to 100 times before throwing. On an 8×8 grid with 12 arrows this rarely triggers. If you increase `arrowCount` significantly, raise the retry cap or reduce `targetLength` range.
-
-### Tailwind v4 vs v3 differences
-- No `tailwind.config.js` — configuration lives in CSS via `@theme {}`
-- Arbitrary values like `stroke-[0.25]` still work
-- The `content` array is auto-detected from Vite; no manual glob needed
-- `@tailwindcss/vite` replaces the old PostCSS setup entirely
+### Game rules
+Rule constants live in `lib/constants/game.ts` (e.g. `MAX_LIVES = 3`).
+Difficulty definitions and grid-size derivation live in
+`lib/config/difficulties.ts`.

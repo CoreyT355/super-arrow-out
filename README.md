@@ -90,15 +90,45 @@ pnpm check      # svelte-check + TypeScript
 src/
 ├── lib/
 │   ├── types.ts                              # Arrow, Level, Direction, GridPos
+│   ├── config/
+│   │   └── difficulties.ts                   # Difficulty table + grid-size derivation
+│   ├── constants/
+│   │   ├── game.ts                           # Lives, arrow lengths, generation tuning
+│   │   ├── theme.ts                          # Colour palette, gradients
+│   │   └── timing.ts                         # Animation durations
+│   ├── stores/
+│   │   ├── settings.svelte.ts                # Dark mode, grid lines, win animation, etc.
+│   │   ├── progress.svelte.ts                # Wins per difficulty + win streak
+│   │   └── resume.svelte.ts                  # Saved puzzle blob for Try Again / resume
+│   ├── components/
+│   │   ├── MenuScreen.svelte                 # Start menu (difficulty list, resume card)
+│   │   ├── GameScreen.svelte                 # In-game view (board, top bar, overlays)
+│   │   ├── StatsScreen.svelte                # Win-history donut + streaks
+│   │   ├── Board.svelte                      # SVG grid + arrow rendering
+│   │   ├── TopBar.svelte                     # Lives, menu, settings buttons
+│   │   ├── SettingsPanel.svelte              # Settings modal
+│   │   ├── WinOverlay.svelte                 # Win screen + vortex animation
+│   │   ├── LoseOverlay.svelte                # Out-of-lives screen
+│   │   ├── ResumeCard.svelte                 # Resume-saved-puzzle card
+│   │   └── DifficultyButton.svelte           # Single difficulty entry
+│   ├── actions/
+│   │   └── panZoom.svelte.ts                 # Pinch-to-zoom / pan Svelte action
 │   ├── utils/
-│   │   ├── puzzleGenerator.ts               # Procedural level generator
-│   │   └── trapFocus.ts                     # Svelte action: focus trap for modals
+│   │   ├── puzzleGenerator.ts                # Procedural level generator
+│   │   ├── snakeMath.ts                      # Arrow geometry / collision helpers
+│   │   ├── svgPath.ts                        # Rounded SVG path construction
+│   │   ├── easing.ts                         # Easing curves
+│   │   ├── animTiming.ts                     # RAF animation timing helpers
+│   │   ├── gestures.ts                       # Touch / pointer gesture parsing
+│   │   ├── persisted.ts                      # SSR-safe localStorage wrapper
+│   │   └── trapFocus.ts                      # Svelte action: focus trap for modals
 │   └── workers/
-│       └── puzzleGenerator.worker.ts        # Web Worker wrapper for off-thread generation
+│       ├── puzzleGenerator.worker.ts         # Off-thread puzzle generation
+│       └── workerBridge.ts                   # Promise-based worker messaging wrapper
 └── routes/
     ├── +layout.svelte
     ├── layout.css                            # Global styles, Tailwind import, mobile scroll lock
-    └── +page.svelte                          # Entire game — menu, play, stats screens
+    └── +page.svelte                          # Thin router — switches between menu / game / stats
 ```
 
-The puzzle generator fills a grid using a constrained random walk, rejects placements that strand cells into pockets too small for a valid arrow, and absorbs any short stubs into adjacent tails as a safety net.
+The puzzle generator fills a grid using a constrained random walk, rejects placements that strand cells into pockets too small for a valid arrow, and absorbs any short stubs into adjacent tails as a safety net. Generation runs in a Web Worker (`workers/`) so the UI stays responsive on large grids.

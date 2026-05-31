@@ -220,6 +220,9 @@ describe('generateLevel — head/body alignment invariant', () => {
             [30, 34,   100], // Super Hard
             [60, 68,    30], // Expert
             [120, 137,  20], // Ludicrous (non-square ~16384 cells)
+            [180, 180,  16], // The Iron Tangle (~32400 cells) — the deadlock
+                             // rate here is high enough that the deterministic
+                             // repair in generateLevel must guarantee solvability.
         ];
         let totalDrained = 0;
         let totalArrows = 0;
@@ -264,7 +267,25 @@ describe('generateLevel — head/body alignment invariant', () => {
         // Sanity: the suite should have actually exercised something.
         expect(totalArrows).toBeGreaterThan(0);
         expect(totalDrained).toBe(totalArrows);
-    }, 180_000);
+    }, 300_000);
+
+    // Regression for the unsolvable Iron Tangle puzzles: this seed deadlocks
+    // through all of generateLevel's natural retry attempts, so it exercises
+    // the deterministic repair path directly. Before the repair existed,
+    // generateLevel shipped this board with hundreds of un-tappable arrows.
+    it('repairs a known-deadlocking Iron Tangle seed into a solvable board', () => {
+        const w = 180, h = 180;
+        const level = generateLevel(w, h, 1005);
+        // Full tiling preserved by the repair.
+        const covered = new Set<string>();
+        for (const a of level.arrows) for (const p of a.path) covered.add(`${p.x},${p.y}`);
+        expect(covered.size).toBe(w * h);
+        // No self-blocked arrows, and the board fully drains by game rules.
+        for (const a of level.arrows) {
+            expect(isSelfBlocked(a, w, h), `self-blocked arrow id=${a.id}`).toBe(false);
+        }
+        expect(simulateDrain(level.arrows, w, h)).toBe(level.arrows.length);
+    }, 60_000);
 
     // Reproducibility: same seed must produce the same level. This is
     // worth its own assertion so the seeded-trial messages above are

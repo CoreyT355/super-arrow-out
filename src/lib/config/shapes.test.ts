@@ -40,7 +40,7 @@ describe('shape catalog', () => {
     it('has classic first and the full shape set', () => {
         expect(SHAPES[0].id).toBe('classic');
         expect(SHAPES.map(s => s.id).sort()).toEqual(
-            ['circle', 'classic', 'diamond', 'heart', 'hexagon', 'star', 'triangle'],
+            ['circle', 'classic', 'diamond', 'ghost', 'heart', 'hexagon', 'star', 'triangle'],
         );
         expect(NON_CLASSIC_SHAPES.every(s => s.id !== 'classic')).toBe(true);
     });

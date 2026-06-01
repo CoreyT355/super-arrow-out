@@ -74,7 +74,7 @@
                                ? 'bg-slate-700/70 text-slate-200 hover:bg-slate-700 border border-slate-600/60'
                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'}"
             >
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <svg width="32" height="32" viewBox={s.iconViewBox} fill="currentColor" aria-hidden="true">
                     <path d={s.icon} />
                 </svg>
                 <span class="text-xs font-medium">{s.label}</span>

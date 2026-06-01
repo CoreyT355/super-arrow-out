@@ -21,12 +21,12 @@
 // ║                                                                          ║
 // ╚════════════════════════════════════════════════════════════════════════╝
 
-import { flattenPath, bbox } from '$lib/utils/svgFlatten';
+import { flattenRings, bbox, svgToPath, svgAttr } from '$lib/utils/svgFlatten';
 
 export type Point = readonly [number, number];
 
 export interface Shape {
-    id:         string;   // 'classic' | 'heart' | 'diamond' | 'circle'
+    id:         string;   // derived from the .svg filename ('heart', 'star', …)
     label:      string;
     /** Polygon normalized to the unit square [0,1]². `null` = classic (rect). */
     polygon:    readonly Point[] | null;
@@ -37,66 +37,71 @@ export interface Shape {
     minFilled:  number;
     /** Optional upper bound on target filled cells. */
     maxFilled?: number;
-    /** 24×24 viewBox path for the menu chip icon. */
+    /** SVG path `d` for the menu chip icon (from the source .svg). */
     icon:       string;
+    /** viewBox for the chip <svg>, matching the source file. */
+    iconViewBox: string;
 }
 
-// ─── shape definitions ───────────────────────────────────────────────────────
+// ─── shape catalog (loaded from src/lib/shapes/*.svg) ────────────────────────
 //
-// Each non-classic shape is authored as ONE SVG path string in a 0–24 box
-// (same space as the menu icon). That single string is the source of truth:
-//   • flattened → polygon (the fill mask), and
-//   • rendered directly → the menu chip icon.
+// Drop an .svg into src/lib/shapes/ and it becomes a playable shape — no code
+// change needed. See src/lib/shapes/README.md for the conventions. Each file's
+// geometry (path / polygon / rect / circle / ellipse) is extracted and
+// flattened into the fill mask; the same path renders as the menu icon.
 //
-// Adding a shape = add a path string below. Use M/L/H/V/C/S/Q/T/Z only
-// (no arcs — see svgFlatten). Orientation is screen-space (y grows downward),
-// so e.g. a heart's point sits at the larger-y bottom.
+// Per-file metadata via attributes on the root <svg>:
+//   data-label       display name      (default: title-cased filename)
+//   data-min-filled  min target cells  (default: 60)
+//   data-max-filled  max target cells  (optional)
+//   data-order       sort order        (default: 100)
+//   viewBox          chip framing      (default: "0 0 24 24")
+//
+// Imported eagerly as raw strings at build time, so this stays DOM-free and
+// works on the server, in the worker's siblings, and in vitest.
+const SVG_FILES = import.meta.glob('$lib/shapes/*.svg', {
+    query: '?raw', import: 'default', eager: true,
+}) as Record<string, string>;
 
-interface ShapeDef {
-    id:         string;
-    label:      string;
-    path:       string;
-    minFilled:  number;
-    maxFilled?: number;
+function titleCase(s: string): string {
+    return s.replace(/(^|[-_])(\w)/g, (_, __, c) => ' ' + c.toUpperCase()).trim();
 }
 
-const SHAPE_DEFS: ShapeDef[] = [
-    { id: 'heart',    label: 'Heart',    minFilled: 80,
-      path: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z' },
-    { id: 'diamond',  label: 'Diamond',  minFilled: 24,
-      path: 'M12 2 L22 12 L12 22 L2 12 Z' },
-    { id: 'circle',   label: 'Circle',   minFilled: 36,
-      path: 'M12 2 C17.52 2 22 6.48 22 12 C22 17.52 17.52 22 12 22 C6.48 22 2 17.52 2 12 C2 6.48 6.48 2 12 2 Z' },
-    { id: 'triangle', label: 'Triangle', minFilled: 36,
-      path: 'M12 2.5 L22 21 L2 21 Z' },
-    { id: 'hexagon',  label: 'Hexagon',  minFilled: 36,
-      path: 'M12 2 L21 7 L21 17 L12 22 L3 17 L3 7 Z' },
-    { id: 'star',     label: 'Star',     minFilled: 120,
-      path: 'M12 2 L14.35 8.76 L21.51 8.91 L15.8 13.24 L17.88 20.09 L12 16 L6.12 20.09 L8.2 13.24 L2.49 8.91 L9.65 8.76 Z' },
-];
-
-/** Flatten a path and normalize the polygon into the unit square [0,1]²,
- *  returning the polygon plus the raw width/height aspect. */
-function fromPath(path: string): { polygon: Point[]; aspect: number } {
-    const flat = flattenPath(path);
+function buildShape(filePath: string, svg: string): Shape & { order: number } {
+    const id = filePath.split('/').pop()!.replace(/\.svg$/i, '').toLowerCase();
+    const d = svgToPath(svg);
+    const flat = flattenPath(d);
     const b = bbox(flat);
     const w = b.maxX - b.minX || 1;
     const h = b.maxY - b.minY || 1;
     const polygon: Point[] = flat.map(([x, y]) => [(x - b.minX) / w, (y - b.minY) / h] as Point);
-    return { polygon, aspect: w / h };
+
+    const minFilled = Number(svgAttr(svg, 'data-min-filled') ?? 60);
+    const maxRaw    = svgAttr(svg, 'data-max-filled');
+    return {
+        id,
+        label:       svgAttr(svg, 'data-label') ?? titleCase(id),
+        polygon,
+        aspect:      w / h,
+        minFilled,
+        maxFilled:   maxRaw != null ? Number(maxRaw) : undefined,
+        icon:        d,
+        iconViewBox: svgAttr(svg, 'viewBox') ?? '0 0 24 24',
+        order:       Number(svgAttr(svg, 'data-order') ?? 100),
+    };
 }
 
-// ─── shape catalog ─────────────────────────────────────────────────────────
+const CLASSIC_SHAPE: Shape = {
+    id: 'classic', label: 'Classic', polygon: null, aspect: 1, minFilled: 0,
+    icon: 'M4 4h16v16H4z', iconViewBox: '0 0 24 24',
+};
 
 export const SHAPES: readonly Shape[] = [
-    {
-        id: 'classic', label: 'Classic', polygon: null, aspect: 1, minFilled: 0,
-        icon: 'M4 4h16v16H4z',
-    },
-    ...SHAPE_DEFS.map((d): Shape => {
-        const { polygon, aspect } = fromPath(d.path);
-        return { id: d.id, label: d.label, polygon, aspect, minFilled: d.minFilled, maxFilled: d.maxFilled, icon: d.path };
-    }),
+    CLASSIC_SHAPE,
+    ...Object.entries(SVG_FILES)
+        .map(([path, svg]) => buildShape(path, svg))
+        .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
+        .map(({ order: _order, ...shape }) => shape),
 ];
 
 export const CLASSIC: Shape = SHAPES[0];

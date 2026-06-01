@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { flattenPath, bbox, type Pt } from './svgFlatten';
+import { flattenPath, bbox, svgToPath, svgAttr, type Pt } from './svgFlatten';
 
 // Even-odd point-in-polygon, mirroring the one used for the mask.
 function inside(px: number, py: number, poly: readonly Pt[]): boolean {
@@ -46,6 +46,60 @@ describe('flattenPath', () => {
         expect(b.minY).toBeCloseTo(0, 5);
         expect(b.maxY).toBeGreaterThan(6); // bows downward toward the controls
         expect(p.length).toBeGreaterThan(10); // sampled into many segments
+    });
+
+    it('svgToPath: extracts <path d>', () => {
+        const d = svgToPath('<svg><path d="M0 0 L10 0 L10 10 Z" fill="red"/></svg>');
+        expect(d).toBe('M0 0 L10 0 L10 10 Z');
+    });
+
+    it('svgToPath: converts <polygon> to a closed path', () => {
+        const d = svgToPath('<svg><polygon points="0,0 10,0 5,10"/></svg>');
+        const p = flattenPath(d);
+        expect(bbox(p)).toMatchObject({ minX: 0, minY: 0, maxX: 10, maxY: 10 });
+        expect(inside(5, 3, p)).toBe(true);
+    });
+
+    it('svgToPath: converts <rect> and <circle> to fillable paths', () => {
+        const rect = flattenPath(svgToPath('<svg><rect x="0" y="0" width="10" height="6"/></svg>'));
+        expect(bbox(rect)).toMatchObject({ minX: 0, minY: 0, maxX: 10, maxY: 6 });
+        expect(inside(5, 3, rect)).toBe(true);
+
+        const circle = flattenPath(svgToPath('<svg><circle cx="10" cy="10" r="10"/></svg>'));
+        const b = bbox(circle);
+        expect(b.minX).toBeCloseTo(0, 1);
+        expect(b.maxX).toBeCloseTo(20, 1);
+        expect(inside(10, 10, circle)).toBe(true);  // center in
+        expect(inside(0.5, 0.5, circle)).toBe(false); // corner out
+    });
+
+    it('arc command: a circle via two semicircle arcs', () => {
+        // Two arcs sweeping back to start trace a full circle, r=5 at (5,5).
+        const p = flattenPath('M0 5 A5 5 0 0 1 10 5 A5 5 0 0 1 0 5 Z', 24);
+        const b = bbox(p);
+        expect(b.minX).toBeCloseTo(0, 1);
+        expect(b.maxX).toBeCloseTo(10, 1);
+        expect(b.minY).toBeCloseTo(0, 1);
+        expect(b.maxY).toBeCloseTo(10, 1);
+        expect(inside(5, 5, p)).toBe(true);
+        expect(inside(0.3, 0.3, p)).toBe(false); // corner outside the circle
+    });
+
+    it('arc command: relative arcs (ghost head) advance the cursor correctly', () => {
+        // Mirrors the ghost head: relative arc then a vertical line down.
+        const p = flattenPath('M12 2a9 9 0 0 0-9 9v6h18V11a9 9 0 0 0-9-9Z', 16);
+        const b = bbox(p);
+        expect(b.minX).toBeCloseTo(3, 0);
+        expect(b.maxX).toBeCloseTo(21, 0);
+        expect(b.minY).toBeCloseTo(2, 0);
+        expect(inside(12, 10, p)).toBe(true);
+    });
+
+    it('svgAttr: reads root attributes', () => {
+        const svg = '<svg viewBox="0 0 24 24" data-min-filled="120"><path d="M0 0"/></svg>';
+        expect(svgAttr(svg, 'viewBox')).toBe('0 0 24 24');
+        expect(svgAttr(svg, 'data-min-filled')).toBe('120');
+        expect(svgAttr(svg, 'data-nope')).toBeUndefined();
     });
 
     it('material heart path flattens to a sane heart bbox', () => {

@@ -44,6 +44,10 @@
         showGrid:       boolean;
         roundedCorners: boolean;
 
+        // shaped puzzles: silhouette / clip path in grid units. null for
+        // classic rectangular boards (renders exactly as before).
+        shapePathD?: string | null;
+
         // pan/zoom (mutated by the action; parent reads back the same proxy)
         panZoomState: PanZoomState;
 
@@ -79,6 +83,7 @@
         gridW, gridH, level,
         removed, markedRed, anims, now,
         darkMode, showGrid, roundedCorners,
+        shapePathD = null,
         panZoomState,
         staticArrowData,
         themeColor,
@@ -118,9 +123,25 @@
                 <rect x="0.06" y="0.06" width="0.88" height="0.88" rx="0.18"
                     fill={darkMode ? 'rgba(51,65,85,0.6)' : 'rgba(203,213,225,0.8)'} />
             </pattern>
+            {#if shapePathD}
+                <clipPath id="shape-clip" clipPathUnits="userSpaceOnUse">
+                    <path d={shapePathD} />
+                </clipPath>
+            {/if}
         </defs>
+
+        <!-- Shaped puzzles: faint silhouette behind the grid so the shape reads
+             even before it's solved. Classic boards skip this entirely. -->
+        {#if shapePathD}
+            <path d={shapePathD}
+                fill={darkMode ? 'rgba(148,163,184,0.07)' : 'rgba(100,116,139,0.08)'}
+                stroke={darkMode ? 'rgba(148,163,184,0.35)' : 'rgba(100,116,139,0.35)'}
+                stroke-width="0.06" />
+        {/if}
+
         {#if showGrid}
-            <rect x="0" y="0" width={gridW} height={gridH} fill="url(#cell-bg)" />
+            <rect x="0" y="0" width={gridW} height={gridH} fill="url(#cell-bg)"
+                clip-path={shapePathD ? 'url(#shape-clip)' : undefined} />
         {/if}
 
         <!-- Arrows: split static vs animating so RAF ticks only re-render
@@ -227,7 +248,8 @@
             <!-- Fade the board colour over the grid lines as the spiral completes -->
             <rect x="0" y="0" width={gridW} height={gridH}
                 fill={darkMode ? '#0f172a' : '#f1f5f9'}
-                opacity={spinEP} />
+                opacity={spinEP}
+                clip-path={shapePathD ? 'url(#shape-clip)' : undefined} />
             {#each vortexParticles as pt}
                 {@const lElapsed    = Math.max(0, elapsed - pt.delay)}
                 <!-- Phase 1: fade in linearly over VORTEX_FADE_MS -->

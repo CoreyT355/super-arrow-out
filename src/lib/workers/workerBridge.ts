@@ -9,13 +9,22 @@ import GeneratorWorker from './puzzleGenerator.worker?worker';
 // Iron Tangle can hold tens of thousands of cells in flight during
 // generation) at the cost of a small spin-up per call.
 
-export function generateInWorker(w: number, h: number): Promise<Level> {
+// `shape`/`mask` describe a shaped puzzle (see docs/shaped-puzzles.md). Omit
+// both for a classic rectangular board. The mask is computed on the main
+// thread (we need w/h from it anyway) and passed through so the worker doesn't
+// recompute it; the worker stamps `shape` onto the returned Level.
+export function generateInWorker(
+    w: number,
+    h: number,
+    shape?: string,
+    mask?: boolean[],
+): Promise<Level> {
     return new Promise((resolve) => {
         const worker = new GeneratorWorker();
         worker.onmessage = (e: MessageEvent<Level>) => {
             resolve(e.data);
             worker.terminate();
         };
-        worker.postMessage({ w, h });
+        worker.postMessage({ w, h, shape, mask });
     });
 }

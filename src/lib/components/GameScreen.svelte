@@ -20,6 +20,7 @@
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
 
     import { DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
+    import { shapeById, rasterizeShape, computeShapedGridSize, shapePathInGrid } from '$lib/config/shapes';
     import {
         NUDGE_FWD,
         NUDGE_BACK,
@@ -40,7 +41,7 @@
     // self-contained game session until the user navigates back.
 
     type StartRequest =
-        | { kind: 'new';    cells: number; square: boolean }
+        | { kind: 'new';    cells: number; square: boolean; shape?: string }
         | { kind: 'resume' };
 
     interface Props {
@@ -68,6 +69,8 @@
     let now               = $state(performance.now());
     let lives             = $state(MAX_LIVES);
     let currentDifficulty = $state<string | null>(null);
+    let currentShape      = $state<string | null>(null); // shape id; null = classic
+    let mask              = $state<boolean[] | null>(null); // in-shape mask (null = classic)
     let winCounted        = false; // plain bool — fires once per game session
     let lostCounted       = false; // same
     let rafId: number | null = null;
@@ -130,6 +133,12 @@
     );
     const won  = $derived(level.arrows.length > 0 && level.arrows.every(a => removed.has(a.id)));
     const lost = $derived(lives <= 0 && !won);
+
+    // Silhouette / clip path for the current shape, in grid units. null when
+    // classic (Board renders the full rectangle as today).
+    const shapePathD = $derived(
+        currentShape ? shapePathInGrid(shapeById(currentShape), W, H) : null,
+    );
 
     // ─── click handler ──────────────────────────────────────────────────────
     function handleClick(id: number) {
@@ -225,6 +234,11 @@
                 }
                 W = r.W; H = r.H;
                 currentDifficulty = r.difficulty;
+                // Re-derive the mask from the saved puzzle's shape (deterministic
+                // from shape id + W + H), so the silhouette/clip render on resume.
+                const shapeObj = shapeById(saved.shape ?? r.shape);
+                currentShape = shapeObj.polygon ? shapeObj.id : null;
+                mask = shapeObj.polygon ? rasterizeShape(shapeObj, W, H) : null;
                 level    = saved;
                 removed  = new Set(r.removedIds);
                 markedRed = new Set(r.markedRedIds);
@@ -236,9 +250,21 @@
             }
             // 'new'
             await tick(); // flush DOM so the loading overlay paints first
-            const { w, h } = computeGridSize(request.cells, request.square);
+            // Shaped puzzles size to a target *filled* cell count at the shape's
+            // fixed aspect; classic uses the existing viewport-aware sizing.
+            const shapeObj = shapeById(request.shape);
+            let w: number, h: number, m: boolean[] | null;
+            if (shapeObj.polygon) {
+                const g = computeShapedGridSize(shapeObj, request.cells);
+                w = g.w; h = g.h; m = g.mask;
+            } else {
+                const g = computeGridSize(request.cells, request.square);
+                w = g.w; h = g.h; m = null;
+            }
             if (cancelled) return;
             W = w; H = h;
+            mask         = m;
+            currentShape = shapeObj.polygon ? shapeObj.id : null;
             removed   = new Set();
             markedRed = new Set();
             anims     = {};
@@ -246,7 +272,7 @@
             currentDifficulty = DIFFICULTIES.find(
                 d => d.cells === request.cells && d.square === request.square,
             )?.label ?? null;
-            const generated = await generateInWorker(w, h);
+            const generated = await generateInWorker(w, h, currentShape ?? undefined, m ?? undefined);
             if (cancelled) return;
             level = generated;
             resumeStore.puzzle = generated;
@@ -270,9 +296,10 @@
         lostCounted = false;
         resumeStore.clear();
         if (reuse) {
-            level = resumeStore.puzzle ?? generateLevel(W, H);
+            level = resumeStore.puzzle ?? generateLevel(W, H, undefined, mask ?? undefined);
         } else {
-            level = generateLevel(W, H);
+            level = generateLevel(W, H, undefined, mask ?? undefined);
+            if (currentShape) level.shape = currentShape;
             resumeStore.puzzle = level;
         }
         resetView();
@@ -291,7 +318,7 @@
         menuOpen     = false;
         showLoading  = true;
         await tick();
-        level = await generateInWorker(W, H);
+        level = await generateInWorker(W, H, currentShape ?? undefined, mask ?? undefined);
         resumeStore.puzzle = level;
         resetView();
         showLoading  = false;
@@ -323,6 +350,7 @@
             markedRedIds: [...markedRed],
             lives,
             difficulty:   currentDifficulty,
+            shape:        currentShape,
             W,
             H,
             totalArrows:  level.arrows.length,
@@ -459,6 +487,7 @@
             gridW={W} gridH={H}
             {level} {removed} {markedRed} {anims} {now}
             {darkMode} {showGrid} {roundedCorners}
+            {shapePathD}
             {panZoomState}
             {staticArrowData}
             {themeColor}

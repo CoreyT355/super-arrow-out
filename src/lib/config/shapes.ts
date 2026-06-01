@@ -1,12 +1,12 @@
-// ╔════════════════════════════════════════════════════════════════════════╗
+// ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  SHAPE MASKS — turn a shape into the set of "in-shape" grid cells        ║
-// ╠════════════════════════════════════════════════════════════════════════╣
+// ╠══════════════════════════════════════════════════════════════════════════╣
 // ║                                                                          ║
 // ║  A shaped puzzle masks the normal rectangular grid so the snakes fill    ║
 // ║  only the shape's area (see docs/shaped-puzzles.md).                     ║
 // ║                                                                          ║
 // ║  Each shape is authored as a POLYGON normalized to the unit square       ║
-// ║  [0,1]². That single source of truth drives both:                       ║
+// ║  [0,1]². That single source of truth drives both:                        ║
 // ║    • rasterization — point-in-polygon at each cell center (pure, no DOM, ║
 // ║      so it works in the worker and in vitest), and                       ║
 // ║    • rendering     — the same points scaled to grid units give the       ║
@@ -19,9 +19,9 @@
 // ║  "classic" is the rectangle (no polygon) — every cell is in-shape, i.e.  ║
 // ║  today's behavior.                                                       ║
 // ║                                                                          ║
-// ╚════════════════════════════════════════════════════════════════════════╝
+// ╚══════════════════════════════════════════════════════════════════════════╝
 
-import { flattenRings, bbox, svgToPath, svgAttr } from '$lib/utils/svgFlatten';
+import { flattenPath, bbox, svgToPath, svgAttr } from '$lib/utils/svgFlatten';
 
 export type Point = readonly [number, number];
 

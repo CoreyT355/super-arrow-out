@@ -37,9 +37,11 @@ function isConnected(mask: boolean[], w: number, h: number): boolean {
 }
 
 describe('shape catalog', () => {
-    it('has classic first and the v1 shapes', () => {
+    it('has classic first and the full shape set', () => {
         expect(SHAPES[0].id).toBe('classic');
-        expect(SHAPES.map(s => s.id).sort()).toEqual(['circle', 'classic', 'diamond', 'heart']);
+        expect(SHAPES.map(s => s.id).sort()).toEqual(
+            ['circle', 'classic', 'diamond', 'heart', 'hexagon', 'star', 'triangle'],
+        );
         expect(NON_CLASSIC_SHAPES.every(s => s.id !== 'classic')).toBe(true);
     });
 
@@ -68,12 +70,13 @@ describe('rasterizeShape', () => {
             expect(isConnected(mask, w, h)).toBe(true);
         });
 
-        it(`${shape.id}: corners are outside the mask`, () => {
+        it(`${shape.id}: top corners are outside the mask`, () => {
+            // Top corners are outside for every shape in the catalog. (Bottom
+            // corners can be inside — e.g. a triangle's base spans the width.)
             const w = 40, h = 40;
             const mask = rasterizeShape(shape, w, h);
-            expect(mask[0]).toBe(false);             // top-left
-            expect(mask[w - 1]).toBe(false);         // top-right
-            expect(mask[w * h - 1]).toBe(false);     // bottom-right
+            expect(mask[0]).toBe(false);       // top-left
+            expect(mask[w - 1]).toBe(false);   // top-right
         });
 
         it(`${shape.id}: center cell is inside the mask`, () => {
@@ -118,11 +121,12 @@ describe('eligibleShapes', () => {
     });
     it('adds shapes as the target grows', () => {
         const at36 = eligibleShapes(36).map(s => s.id);
-        expect(at36).toContain('classic');
-        expect(at36).toContain('diamond');
-        expect(at36).toContain('circle');
+        expect(at36).toEqual(expect.arrayContaining(['classic', 'diamond', 'circle', 'triangle', 'hexagon']));
         expect(at36).not.toContain('heart'); // heart min is 80
+        expect(at36).not.toContain('star');  // star min is 120
         expect(eligibleShapes(100).map(s => s.id)).toContain('heart');
+        expect(eligibleShapes(100).map(s => s.id)).not.toContain('star');
+        expect(eligibleShapes(150).map(s => s.id)).toContain('star');
     });
 });
 

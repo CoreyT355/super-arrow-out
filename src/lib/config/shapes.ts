@@ -21,6 +21,8 @@
 // ║                                                                          ║
 // ╚════════════════════════════════════════════════════════════════════════╝
 
+import { flattenPath, bbox } from '$lib/utils/svgFlatten';
+
 export type Point = readonly [number, number];
 
 export interface Shape {
@@ -39,56 +41,50 @@ export interface Shape {
     icon:       string;
 }
 
-// ─── polygon builders ──────────────────────────────────────────────────────
+// ─── shape definitions ───────────────────────────────────────────────────────
+//
+// Each non-classic shape is authored as ONE SVG path string in a 0–24 box
+// (same space as the menu icon). That single string is the source of truth:
+//   • flattened → polygon (the fill mask), and
+//   • rendered directly → the menu chip icon.
+//
+// Adding a shape = add a path string below. Use M/L/H/V/C/S/Q/T/Z only
+// (no arcs — see svgFlatten). Orientation is screen-space (y grows downward),
+// so e.g. a heart's point sits at the larger-y bottom.
 
-/** Normalize raw points into the unit square, returning the points (y kept as
- *  given) plus the raw aspect (width/height before normalization). Optionally
- *  flips y so a "math up" curve reads correctly in "screen down" coords. */
-function normalize(raw: Point[], flipY: boolean): { polygon: Point[]; aspect: number } {
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const [x, y] of raw) {
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-    }
-    const w = maxX - minX || 1;
-    const h = maxY - minY || 1;
-    const polygon: Point[] = raw.map(([x, y]) => {
-        const nx = (x - minX) / w;
-        const ny = (y - minY) / h;
-        return [nx, flipY ? 1 - ny : ny] as Point;
-    });
+interface ShapeDef {
+    id:         string;
+    label:      string;
+    path:       string;
+    minFilled:  number;
+    maxFilled?: number;
+}
+
+const SHAPE_DEFS: ShapeDef[] = [
+    { id: 'heart',    label: 'Heart',    minFilled: 80,
+      path: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z' },
+    { id: 'diamond',  label: 'Diamond',  minFilled: 24,
+      path: 'M12 2 L22 12 L12 22 L2 12 Z' },
+    { id: 'circle',   label: 'Circle',   minFilled: 36,
+      path: 'M12 2 C17.52 2 22 6.48 22 12 C22 17.52 17.52 22 12 22 C6.48 22 2 17.52 2 12 C2 6.48 6.48 2 12 2 Z' },
+    { id: 'triangle', label: 'Triangle', minFilled: 36,
+      path: 'M12 2.5 L22 21 L2 21 Z' },
+    { id: 'hexagon',  label: 'Hexagon',  minFilled: 36,
+      path: 'M12 2 L21 7 L21 17 L12 22 L3 17 L3 7 Z' },
+    { id: 'star',     label: 'Star',     minFilled: 120,
+      path: 'M12 2 L14.35 8.76 L21.51 8.91 L15.8 13.24 L17.88 20.09 L12 16 L6.12 20.09 L8.2 13.24 L2.49 8.91 L9.65 8.76 Z' },
+];
+
+/** Flatten a path and normalize the polygon into the unit square [0,1]²,
+ *  returning the polygon plus the raw width/height aspect. */
+function fromPath(path: string): { polygon: Point[]; aspect: number } {
+    const flat = flattenPath(path);
+    const b = bbox(flat);
+    const w = b.maxX - b.minX || 1;
+    const h = b.maxY - b.minY || 1;
+    const polygon: Point[] = flat.map(([x, y]) => [(x - b.minX) / w, (y - b.minY) / h] as Point);
     return { polygon, aspect: w / h };
 }
-
-/** Classic parametric heart (16 sin³t, 13cos t − 5cos2t − 2cos3t − cos4t),
- *  sampled and normalized into the unit square with the point at the bottom. */
-function buildHeart(samples = 96): { polygon: Point[]; aspect: number } {
-    const raw: Point[] = [];
-    for (let i = 0; i < samples; i++) {
-        const t = (i / samples) * Math.PI * 2;
-        const x = 16 * Math.sin(t) ** 3;
-        const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
-        raw.push([x, y]);
-    }
-    return normalize(raw, /* flipY */ true);
-}
-
-/** Regular polygon approximating a circle, centered in the unit square. */
-function buildCircle(samples = 64): { polygon: Point[]; aspect: number } {
-    const raw: Point[] = [];
-    for (let i = 0; i < samples; i++) {
-        const t = (i / samples) * Math.PI * 2;
-        raw.push([0.5 + 0.5 * Math.cos(t), 0.5 + 0.5 * Math.sin(t)]);
-    }
-    return { polygon: raw, aspect: 1 };
-}
-
-const HEART  = buildHeart();
-const CIRCLE = buildCircle();
-const DIAMOND: { polygon: Point[]; aspect: number } = {
-    polygon: [[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]],
-    aspect: 1,
-};
 
 // ─── shape catalog ─────────────────────────────────────────────────────────
 
@@ -97,18 +93,10 @@ export const SHAPES: readonly Shape[] = [
         id: 'classic', label: 'Classic', polygon: null, aspect: 1, minFilled: 0,
         icon: 'M4 4h16v16H4z',
     },
-    {
-        id: 'heart', label: 'Heart', polygon: HEART.polygon, aspect: HEART.aspect, minFilled: 80,
-        icon: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
-    },
-    {
-        id: 'diamond', label: 'Diamond', polygon: DIAMOND.polygon, aspect: DIAMOND.aspect, minFilled: 24,
-        icon: 'M12 2l10 10-10 10L2 12z',
-    },
-    {
-        id: 'circle', label: 'Circle', polygon: CIRCLE.polygon, aspect: CIRCLE.aspect, minFilled: 36,
-        icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z',
-    },
+    ...SHAPE_DEFS.map((d): Shape => {
+        const { polygon, aspect } = fromPath(d.path);
+        return { id: d.id, label: d.label, polygon, aspect, minFilled: d.minFilled, maxFilled: d.maxFilled, icon: d.path };
+    }),
 ];
 
 export const CLASSIC: Shape = SHAPES[0];

@@ -99,7 +99,7 @@ export const SHAPES: readonly Shape[] = [
     },
     {
         id: 'heart', label: 'Heart', polygon: HEART.polygon, aspect: HEART.aspect, minFilled: 80,
-        icon: 'M12 21s-7.5-4.6-10-9.3C.6 8.9 2 5.5 5.2 5.5c1.9 0 3.3 1.1 4 2.1.7-1 2.1-2.1 4-2.1 3.2 0 4.6 3.4 3.2 6.2C19.5 16.4 12 21 12 21z',
+        icon: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z',
     },
     {
         id: 'diamond', label: 'Diamond', polygon: DIAMOND.polygon, aspect: DIAMOND.aspect, minFilled: 24,

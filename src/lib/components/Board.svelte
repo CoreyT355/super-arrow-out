@@ -130,15 +130,6 @@
             {/if}
         </defs>
 
-        <!-- Shaped puzzles: faint silhouette behind the grid so the shape reads
-             even before it's solved. Classic boards skip this entirely. -->
-        {#if shapePathD}
-            <path d={shapePathD}
-                fill={darkMode ? 'rgba(148,163,184,0.07)' : 'rgba(100,116,139,0.08)'}
-                stroke={darkMode ? 'rgba(148,163,184,0.35)' : 'rgba(100,116,139,0.35)'}
-                stroke-width="0.06" />
-        {/if}
-
         {#if showGrid}
             <rect x="0" y="0" width={gridW} height={gridH} fill="url(#cell-bg)"
                 clip-path={shapePathD ? 'url(#shape-clip)' : undefined} />

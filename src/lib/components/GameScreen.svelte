@@ -19,7 +19,8 @@
     import { progress as progressStore } from '$lib/stores/progress.svelte';
 import { winKey, winsForDifficulty } from '$lib/utils/winKey';
 import { unlockAchievements } from '$lib/stores/achievements.svelte';
-import { achievementById, type Achievement, type AchievementStats } from '$lib/config/achievements';
+import { showAchievementToasts } from '$lib/stores/toasts.svelte';
+import { type AchievementStats } from '$lib/config/achievements';
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
 
     import { DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
@@ -381,19 +382,6 @@ import { achievementById, type Achievement, type AchievementStats } from '$lib/c
         };
     }
 
-    // Achievement toasts: newly unlocked achievements pop in, then auto-dismiss.
-    let achievementToasts = $state<Achievement[]>([]);
-    function announceAchievements(ids: string[]) {
-        for (const id of ids) {
-            const a = achievementById(id);
-            if (!a) continue;
-            achievementToasts.push(a);
-            setTimeout(() => {
-                achievementToasts = achievementToasts.filter(t => t !== a);
-            }, 4200);
-        }
-    }
-
     $effect(() => {
         if (won && !winCounted && currentDifficulty !== null) {
             winCounted = true;
@@ -406,7 +394,7 @@ import { achievementById, type Achievement, type AchievementStats } from '$lib/c
                 current: streak.current + 1,
                 best:    Math.max(streak.best, streak.current + 1),
             };
-            announceAchievements(unlockAchievements(currentStats()));
+            showAchievementToasts(unlockAchievements(currentStats()));
         }
     });
 
@@ -416,7 +404,7 @@ import { achievementById, type Achievement, type AchievementStats } from '$lib/c
             lostCounted = true;
             progressStore.streak = { current: 0, best: streak.best };
             progressStore.losses = progressStore.losses + 1;
-            announceAchievements(unlockAchievements(currentStats()));
+            showAchievementToasts(unlockAchievements(currentStats()));
         }
     });
 
@@ -553,31 +541,5 @@ import { achievementById, type Achievement, type AchievementStats } from '$lib/c
             onTryAgain={() => reset(true)}
             onMenu={goToMenu}
         />
-    {/if}
-
-    <!-- Achievement-unlocked toasts (float above overlays, auto-dismiss) -->
-    {#if achievementToasts.length > 0}
-        <div
-            class="pointer-events-none absolute left-0 right-0 z-50 flex flex-col items-center gap-2 px-4"
-            style="top: calc(3.25rem + env(safe-area-inset-top))"
-            role="status"
-            aria-live="polite"
-        >
-            {#each achievementToasts as ach (ach.id)}
-                <div
-                    transition:fly={{ y: reducedMotion ? 0 : -16, duration: reducedMotion ? 120 : 260, opacity: 0 }}
-                    class="w-full max-w-xs flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border
-                           {darkMode ? 'bg-slate-800/95 border-slate-700/60' : 'bg-white/95 border-slate-200'}"
-                >
-                    <span class="text-2xl leading-none" aria-hidden="true">{ach.icon}</span>
-                    <div class="min-w-0">
-                        <p class="text-[0.65rem] font-semibold uppercase tracking-widest {darkMode ? 'text-amber-400' : 'text-amber-500'}">
-                            Achievement unlocked
-                        </p>
-                        <p class="text-sm font-bold truncate {darkMode ? 'text-white' : 'text-slate-900'}">{ach.title}</p>
-                    </div>
-                </div>
-            {/each}
-        </div>
     {/if}
 </main>

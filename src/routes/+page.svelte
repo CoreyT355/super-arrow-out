@@ -7,6 +7,7 @@
 	import GameScreen from '$lib/components/GameScreen.svelte';
 	import StatsScreen from '$lib/components/StatsScreen.svelte';
 	import AchievementsScreen from '$lib/components/AchievementsScreen.svelte';
+	import AchievementToasts from '$lib/components/AchievementToasts.svelte';
 
 	type StartRequest =
 		| { kind: 'new';    cells: number; square: boolean; shape?: string }
@@ -64,3 +65,6 @@
 		/>
 	{/key}
 {/if}
+
+<!-- App-global achievement toasts (float above every screen) -->
+<AchievementToasts {reducedMotion} />

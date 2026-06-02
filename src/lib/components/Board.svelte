@@ -125,7 +125,7 @@
             </pattern>
             {#if shapePathD}
                 <clipPath id="shape-clip" clipPathUnits="userSpaceOnUse">
-                    <path d={shapePathD} />
+                    <path d={shapePathD} clip-rule="evenodd" />
                 </clipPath>
             {/if}
         </defs>

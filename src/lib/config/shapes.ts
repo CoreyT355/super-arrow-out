@@ -21,15 +21,17 @@
 // ║                                                                          ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 
-import { flattenPath, bbox, svgToPath, svgAttr } from '$lib/utils/svgFlatten';
+import { flattenRings, bbox, svgToPath, svgAttr } from '$lib/utils/svgFlatten';
 
 export type Point = readonly [number, number];
 
 export interface Shape {
     id:         string;   // derived from the .svg filename ('heart', 'star', …)
     label:      string;
-    /** Polygon normalized to the unit square [0,1]². `null` = classic (rect). */
-    polygon:    readonly Point[] | null;
+    /** Sub-path rings normalized to the unit square [0,1]², filled with the
+     *  even-odd rule so a shape can have holes (e.g. the ghost's eyes) without
+     *  the sub-paths being joined by spurious edges. `null` = classic (rect). */
+    polygon:    readonly (readonly Point[])[] | null;
     /** Natural width / height of the raw shape, before unit-square normalize.
      *  The grid sizing aims for w/h ≈ aspect so the shape isn't stretched. */
     aspect:     number;
@@ -70,11 +72,15 @@ function titleCase(s: string): string {
 function buildShape(filePath: string, svg: string): Shape & { order: number } {
     const id = filePath.split('/').pop()!.replace(/\.svg$/i, '').toLowerCase();
     const d = svgToPath(svg);
-    const flat = flattenPath(d);
-    const b = bbox(flat);
+    const rings = flattenRings(d);
+    // Normalize every ring against the SHARED bounding box so the sub-paths
+    // keep their relative positions (eyes stay inside the body, etc.).
+    const b = bbox(rings.flat());
     const w = b.maxX - b.minX || 1;
     const h = b.maxY - b.minY || 1;
-    const polygon: Point[] = flat.map(([x, y]) => [(x - b.minX) / w, (y - b.minY) / h] as Point);
+    const polygon: Point[][] = rings.map(ring =>
+        ring.map(([x, y]) => [(x - b.minX) / w, (y - b.minY) / h] as Point),
+    );
 
     const minFilled = Number(svgAttr(svg, 'data-min-filled') ?? 60);
     const maxRaw    = svgAttr(svg, 'data-max-filled');
@@ -114,15 +120,20 @@ export function shapeById(id: string | undefined | null): Shape {
 
 // ─── point-in-polygon ──────────────────────────────────────────────────────
 
-/** Standard ray-casting test. `poly` is a closed polygon (last→first implied). */
-function pointInPolygon(px: number, py: number, poly: readonly Point[]): boolean {
+/** Even-odd ray-casting test over a set of sub-path rings (each closed,
+ *  last→first implied). Counting edge crossings across ALL rings gives the
+ *  even-odd fill rule: interior holes (an odd nesting depth) read as outside,
+ *  matching how the SVG itself renders. */
+function pointInRings(px: number, py: number, rings: readonly (readonly Point[])[]): boolean {
     let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        const xi = poly[i][0], yi = poly[i][1];
-        const xj = poly[j][0], yj = poly[j][1];
-        const intersect = (yi > py) !== (yj > py)
-            && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
-        if (intersect) inside = !inside;
+    for (const poly of rings) {
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const xi = poly[i][0], yi = poly[i][1];
+            const xj = poly[j][0], yj = poly[j][1];
+            const intersect = (yi > py) !== (yj > py)
+                && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
+            if (intersect) inside = !inside;
+        }
     }
     return inside;
 }
@@ -174,7 +185,7 @@ export function rasterizeShape(shape: Shape, w: number, h: number): boolean[] {
         const py = (y + 0.5) / h;
         for (let x = 0; x < w; x++) {
             const px = (x + 0.5) / w;
-            mask[y * w + x] = pointInPolygon(px, py, shape.polygon);
+            mask[y * w + x] = pointInRings(px, py, shape.polygon);
         }
     }
     return keepLargestComponent(mask, w, h);
@@ -208,7 +219,7 @@ export function computeShapedGridSize(shape: Shape, targetFilled: number): Shape
 
     // Estimate the bounding-box area from the polygon's fill ratio, then size
     // to the shape's aspect: w = √(area·aspect), h = √(area/aspect).
-    const fillRatio = Math.max(0.05, polygonArea(shape.polygon)); // fraction of unit square
+    const fillRatio = Math.max(0.05, unitFillRatio(shape.polygon)); // fraction of unit square
     const sizeFor = (target: number): { w: number; h: number } => {
         const area = target / fillRatio;
         const w = Math.max(2, Math.round(Math.sqrt(area * shape.aspect)));
@@ -234,13 +245,20 @@ export function computeShapedGridSize(shape: Shape, targetFilled: number): Shape
     return best!;
 }
 
-/** Signed-area magnitude (shoelace) of a unit-square polygon = fill fraction. */
-function polygonArea(poly: readonly Point[]): number {
-    let a = 0;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-        a += (poly[j][0] + poly[i][0]) * (poly[j][1] - poly[i][1]);
+/** Fraction of the unit square covered by the rings under the even-odd rule.
+ *  Sampled rather than computed analytically so holes (eyes) are subtracted
+ *  correctly regardless of ring winding direction. Only seeds the grid-size
+ *  search, so a coarse fixed grid is plenty. */
+function unitFillRatio(rings: readonly (readonly Point[])[]): number {
+    const N = 64;
+    let count = 0;
+    for (let y = 0; y < N; y++) {
+        const py = (y + 0.5) / N;
+        for (let x = 0; x < N; x++) {
+            if (pointInRings((x + 0.5) / N, py, rings)) count++;
+        }
     }
-    return Math.abs(a) / 2;
+    return count / (N * N);
 }
 
 // ─── public: eligibility ───────────────────────────────────────────────────
@@ -260,6 +278,12 @@ export function eligibleShapes(targetFilled: number): Shape[] {
  *  0..h). Classic → the full board rectangle. */
 export function shapePathInGrid(shape: Shape, w: number, h: number): string {
     if (!shape.polygon) return `M 0 0 H ${w} V ${h} H 0 Z`;
-    const pts = shape.polygon.map(([x, y]) => `${(x * w).toFixed(3)} ${(y * h).toFixed(3)}`);
-    return `M ${pts.join(' L ')} Z`;
+    // One sub-path per ring; rendered with the even-odd fill/clip rule so the
+    // ghost's eyes (and any hole) cut through. See Board.svelte's clipPath.
+    return shape.polygon
+        .map(ring => {
+            const pts = ring.map(([x, y]) => `${(x * w).toFixed(3)} ${(y * h).toFixed(3)}`);
+            return `M ${pts.join(' L ')} Z`;
+        })
+        .join(' ');
 }

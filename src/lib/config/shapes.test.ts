@@ -90,6 +90,27 @@ describe('rasterizeShape', () => {
     }
 });
 
+describe('ghost holes (even-odd sub-paths)', () => {
+    // Regression: the ghost's eyes are separate sub-paths. Flattening them into
+    // one polygon used to join the body to each eye with spurious edges, which
+    // carved an empty triangle between the eyes. Rings + even-odd fixes it.
+    it('flattens to multiple rings (body + 2 eyes)', () => {
+        expect(shapeById('ghost').polygon!.length).toBeGreaterThan(1);
+    });
+
+    it('the eyes are holes but the area between them stays filled', () => {
+        const w = 40, h = 40;
+        const mask = rasterizeShape(shapeById('ghost'), w, h);
+        const at = (x: number, y: number) => mask[y * w + x];
+        // An eye on each side of center is hollow...
+        expect(at(13, 15)).toBe(false); // left eye
+        expect(at(26, 15)).toBe(false); // right eye
+        // ...but the bridge between them (and above) is filled, not a triangle.
+        expect(at(20, 15)).toBe(true);  // between the eyes
+        expect(at(20, 9)).toBe(true);   // above the eyes
+    });
+});
+
 describe('computeShapedGridSize', () => {
     it('classic returns a square grid matching the target', () => {
         const g = computeShapedGridSize(CLASSIC, 81);

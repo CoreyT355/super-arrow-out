@@ -1,6 +1,6 @@
 # Shaped Puzzles — Design & Implementation Plan
 
-> Status: planned (not yet implemented)
+> Status: implemented (Phases 1–5 complete; per-shape progress wired)
 > Branch: `feature/shaped-puzzles`
 > Last updated: 2026-06-01
 

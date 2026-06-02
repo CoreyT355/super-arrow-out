@@ -2,6 +2,8 @@
     import { settings } from '$lib/stores/settings.svelte';
     import { progress as progressStore } from '$lib/stores/progress.svelte';
     import { ENABLED_DIFFICULTIES } from '$lib/config/difficulties';
+    import { NON_CLASSIC_SHAPES } from '$lib/config/shapes';
+    import { parseWinKey, winsForDifficulty } from '$lib/utils/winKey';
 
     // Stats screen: streak cards, donut chart, per-difficulty breakdown.
     // Read-only — the donut + legend are derived from the progress store.
@@ -19,12 +21,14 @@
     const DONUT_C = 2 * Math.PI * DONUT_R;
     const DONUT_GAP = 2; // px cut from each segment's leading edge
 
+    // Each difficulty's count sums wins across every shape (classic + shaped),
+    // so the donut reflects total play on that difficulty.
     const chartSegments = $derived(
         (() => {
-            const total = ENABLED_DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0);
+            const total = ENABLED_DIFFICULTIES.reduce((s, d) => s + winsForDifficulty(progress, d.label), 0);
             let cumFrac = 0;
             return ENABLED_DIFFICULTIES.map(d => {
-                const count = progress[d.label] ?? 0;
+                const count = winsForDifficulty(progress, d.label);
                 const frac  = total > 0 ? count / total : 0;
                 const angle = cumFrac * 360 - 90; // -90° → start at 12 o'clock
                 const dash  = Math.max(0, frac * DONUT_C - DONUT_GAP);
@@ -34,13 +38,26 @@
         })()
     );
 
-    const totalWins = $derived(ENABLED_DIFFICULTIES.reduce((s, d) => s + (progress[d.label] ?? 0), 0));
+    const totalWins = $derived(ENABLED_DIFFICULTIES.reduce((s, d) => s + winsForDifficulty(progress, d.label), 0));
+
+    // Per-shape totals (summed across difficulties), for the shape breakdown.
+    // Only shapes with at least one win are shown.
+    const shapeSegments = $derived(
+        NON_CLASSIC_SHAPES
+            .map(shape => {
+                const count = Object.entries(progress)
+                    .filter(([key]) => parseWinKey(key).shapeId === shape.id)
+                    .reduce((s, [, n]) => s + n, 0);
+                return { shape, count };
+            })
+            .filter(seg => seg.count > 0)
+    );
 
     // Single-string label of the donut for screen-reader users.
     const donutLabel = $derived.by(() => {
         if (totalWins === 0) return 'Win breakdown: no wins yet';
         const parts = ENABLED_DIFFICULTIES
-            .map(d => `${d.label} ${progress[d.label] ?? 0}`)
+            .map(d => `${d.label} ${winsForDifficulty(progress, d.label)}`)
             .join(', ');
         return `Win breakdown: ${totalWins} total. ${parts}`;
     });
@@ -139,5 +156,23 @@
                 </div>
             {/each}
         </div>
+
+        <!-- Per-shape breakdown (only when shaped puzzles have been won) -->
+        {#if shapeSegments.length > 0}
+            <div class="w-full max-w-xs flex flex-col gap-1">
+                <p class="text-xs {darkMode ? 'text-slate-400' : 'text-slate-500'} tracking-widest uppercase mb-1">By Shape</p>
+                <div class="flex flex-col {darkMode ? 'divide-slate-800/60' : 'divide-slate-300/60'} divide-y">
+                    {#each shapeSegments as seg (seg.shape.id)}
+                        <div class="flex items-center gap-3 py-3">
+                            <svg viewBox={seg.shape.iconViewBox} class="w-4 h-4 shrink-0" aria-hidden="true">
+                                <path d={seg.shape.icon} fill={darkMode ? 'rgb(148,163,184)' : 'rgb(100,116,139)'} />
+                            </svg>
+                            <span class="{darkMode ? 'text-slate-300' : 'text-slate-700'} flex-1 text-sm font-medium">{seg.shape.label}</span>
+                            <span class="{darkMode ? 'text-white' : 'text-slate-900'} font-bold tabular-nums w-8 text-right">{seg.count}</span>
+                        </div>
+                    {/each}
+                </div>
+            </div>
+        {/if}
     </div>
 </main>

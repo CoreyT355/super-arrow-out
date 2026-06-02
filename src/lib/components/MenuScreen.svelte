@@ -10,6 +10,7 @@
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
     import { visibleDifficulties, type Difficulty } from '$lib/config/difficulties';
     import { eligibleShapes } from '$lib/config/shapes';
+    import { winsForDifficulty } from '$lib/utils/winKey';
 
     // Start screen. Owns its own little menuSettingsOpen overlay; everything
     // else (Resume card, difficulty buttons, Stats link) just emits.
@@ -85,7 +86,7 @@
                 {#each difficulties as d}
                     <DifficultyButton
                         difficulty={d}
-                        wins={progress[d.label] ?? 0}
+                        wins={winsForDifficulty(progress, d.label)}
                         onStart={() => chooseDifficulty(d)}
                     />
                 {/each}

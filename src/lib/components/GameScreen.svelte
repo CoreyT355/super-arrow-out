@@ -17,6 +17,7 @@
 
     import { settings } from '$lib/stores/settings.svelte';
     import { progress as progressStore } from '$lib/stores/progress.svelte';
+import { winKey } from '$lib/utils/winKey';
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
 
     import { DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
@@ -363,9 +364,10 @@
     $effect(() => {
         if (won && !winCounted && currentDifficulty !== null) {
             winCounted = true;
+            const key = winKey(currentDifficulty, currentShape);
             progressStore.wins = {
                 ...progress,
-                [currentDifficulty]: (progress[currentDifficulty] ?? 0) + 1,
+                [key]: (progress[key] ?? 0) + 1,
             };
             progressStore.streak = {
                 current: streak.current + 1,

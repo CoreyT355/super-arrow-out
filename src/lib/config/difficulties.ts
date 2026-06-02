@@ -9,8 +9,10 @@
 // from a saved-puzzle blob (e.g. the secret Iron Tangle).
 //
 // `unlockedBy` reveals an otherwise-hidden entry once the named difficulty
-// has at least one recorded win — that's how The Iron Tangle surfaces after
-// the player clears Ludicrous.
+// has at least one recorded win (summed across shapes) — that's how The Iron
+// Tangle surfaces after the player clears Ludicrous on any shape.
+
+import { winsForDifficulty } from '$lib/utils/winKey';
 
 export interface Difficulty {
     label:       string;
@@ -48,7 +50,7 @@ export const ENABLED_DIFFICULTIES: Difficulty[] = DIFFICULTIES.filter(d => !d.hi
  *  position rather than being appended. */
 export function visibleDifficulties(wins: Record<string, number>): Difficulty[] {
     return DIFFICULTIES.filter(
-        d => !d.hidden || (d.unlockedBy != null && (wins[d.unlockedBy] ?? 0) > 0),
+        d => !d.hidden || (d.unlockedBy != null && winsForDifficulty(wins, d.unlockedBy) > 0),
     );
 }
 

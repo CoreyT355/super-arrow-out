@@ -324,7 +324,7 @@
                     {@render legend(shapeSegments)}
                 {:else}
                     <p class="max-w-xs text-center text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
-                        No shaped wins yet. Win a puzzle on a shape — heart, D20, and more — to see it here.
+                        No shaped wins yet. Win a puzzle on any shape (heart, D20, etc.) to see it here.
                     </p>
                 {/if}
             </div>

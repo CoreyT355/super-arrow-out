@@ -239,13 +239,13 @@
         <p class="text-xs {darkMode ? 'text-slate-400' : 'text-slate-500'} tracking-wide uppercase">Win Streak</p>
     </div>
 
-    <!-- Tab bar -->
+    <!-- Tab bar: underline tabs, each sized to its label -->
     <div
         role="tablist"
         aria-label="Stats breakdown"
         tabindex="0"
         onkeydown={onTablistKeydown}
-        class="shrink-0 mx-6 mb-1 flex rounded-xl p-1 {darkMode ? 'bg-slate-800/70' : 'bg-slate-200/80'}"
+        class="shrink-0 flex justify-center gap-6 px-6 mb-1 border-b {darkMode ? 'border-slate-800' : 'border-slate-300/70'}"
     >
         {#each TABS as tab, i}
             <button
@@ -254,16 +254,45 @@
                 aria-selected={activeTab === i}
                 aria-controls="stats-panel-{i}"
                 onclick={() => (activeTab = i)}
-                class="flex-1 py-2 text-sm font-semibold rounded-lg transition-colors
+                class="px-3 py-2.5 -mb-px text-sm font-semibold border-b-2 transition-colors
                        {activeTab === i
-                           ? (darkMode ? 'bg-slate-700 text-white shadow' : 'bg-white text-slate-900 shadow')
-                           : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}"
+                           ? (darkMode ? 'border-sky-400 text-white' : 'border-sky-500 text-slate-900')
+                           : (darkMode ? 'border-transparent text-slate-400 hover:text-slate-200' : 'border-transparent text-slate-500 hover:text-slate-700')}"
             >{tab}</button>
         {/each}
     </div>
 
     <!-- Swipeable panels -->
-    <div class="flex-1 min-h-0 overflow-hidden">
+    <div class="relative flex-1 min-h-0 overflow-hidden">
+        <!-- Swipe affordance: points to the other page, vertically centered.
+             Right on the first page, left on the second. Also tappable. -->
+        <div
+            class="pointer-events-none absolute inset-y-0 z-10 flex items-center
+                   {activeTab === 0 ? 'right-0' : 'left-0'}"
+        >
+            <button
+                type="button"
+                onclick={() => (activeTab = activeTab === 0 ? 1 : 0)}
+                aria-label={activeTab === 0 ? 'Next: Shapes' : 'Previous: Difficulties'}
+                class="pointer-events-auto mx-3 flex items-center justify-center w-10 h-10 rounded-full
+                       border transition-colors {reducedMotion ? '' : (activeTab === 0 ? 'bob-r' : 'bob-l')}
+                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500
+                       {darkMode
+                           ? 'border-slate-700 bg-slate-800/70 text-slate-300 hover:bg-slate-700 hover:text-white'
+                           : 'border-slate-300 bg-white/80 text-slate-500 hover:bg-slate-100 hover:text-slate-800'}"
+            >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true">
+                    {#if activeTab === 0}
+                        <path d="M5 12h14M13 6l6 6-6 6" />
+                    {:else}
+                        <path d="M19 12H5M11 6l-6 6 6 6" />
+                    {/if}
+                </svg>
+            </button>
+        </div>
+
         <!-- Gesture surface only; the tab buttons above are the a11y controls. -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -302,3 +331,11 @@
         </div>
     </div>
 </main>
+
+<style>
+    /* Gentle nudge in the arrow's direction to hint the swipe gesture. */
+    @keyframes bob-right { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
+    @keyframes bob-left  { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(-4px); } }
+    .bob-r { animation: bob-right 1.4s ease-in-out infinite; }
+    .bob-l { animation: bob-left  1.4s ease-in-out infinite; }
+</style>

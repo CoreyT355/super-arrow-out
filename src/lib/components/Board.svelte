@@ -44,6 +44,10 @@
         showGrid:       boolean;
         roundedCorners: boolean;
 
+        // shaped puzzles: silhouette / clip path in grid units. null for
+        // classic rectangular boards (renders exactly as before).
+        shapePathD?: string | null;
+
         // pan/zoom (mutated by the action; parent reads back the same proxy)
         panZoomState: PanZoomState;
 
@@ -79,6 +83,7 @@
         gridW, gridH, level,
         removed, markedRed, anims, now,
         darkMode, showGrid, roundedCorners,
+        shapePathD = null,
         panZoomState,
         staticArrowData,
         themeColor,
@@ -118,9 +123,18 @@
                 <rect x="0.06" y="0.06" width="0.88" height="0.88" rx="0.18"
                     fill={darkMode ? 'rgba(51,65,85,0.6)' : 'rgba(203,213,225,0.8)'} />
             </pattern>
+            {#if shapePathD}
+                <clipPath id="shape-clip" clipPathUnits="userSpaceOnUse">
+                    <!-- nonzero winding (default): holes (ghost eyes) and
+                         overlapping facets (gem) both render like the source SVG -->
+                    <path d={shapePathD} />
+                </clipPath>
+            {/if}
         </defs>
+
         {#if showGrid}
-            <rect x="0" y="0" width={gridW} height={gridH} fill="url(#cell-bg)" />
+            <rect x="0" y="0" width={gridW} height={gridH} fill="url(#cell-bg)"
+                clip-path={shapePathD ? 'url(#shape-clip)' : undefined} />
         {/if}
 
         <!-- Arrows: split static vs animating so RAF ticks only re-render
@@ -227,7 +241,8 @@
             <!-- Fade the board colour over the grid lines as the spiral completes -->
             <rect x="0" y="0" width={gridW} height={gridH}
                 fill={darkMode ? '#0f172a' : '#f1f5f9'}
-                opacity={spinEP} />
+                opacity={spinEP}
+                clip-path={shapePathD ? 'url(#shape-clip)' : undefined} />
             {#each vortexParticles as pt}
                 {@const lElapsed    = Math.max(0, elapsed - pt.delay)}
                 <!-- Phase 1: fade in linearly over VORTEX_FADE_MS -->

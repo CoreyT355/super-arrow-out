@@ -89,7 +89,14 @@ const OUTWARD: Record<Direction, GridPos> = {
 
 // The board is just a 2D array of strings — every cell is either empty (no
 // arrow yet) or occupied (some arrow's body covers it).
-type Grid = ('empty' | 'occupied')[][];
+//
+// 'void' = a cell OUTSIDE the shape mask (shaped puzzles). Void cells are
+// never filled and are transparent to exit rays — see docs/shaped-puzzles.md.
+// Because almost every check below is `=== 'empty'` (which void fails) and
+// clearPathToEdge only blocks on 'empty', adding this third state masks the
+// board with no other structural changes. Classic puzzles pass no mask, so
+// no cell is ever void and behavior is byte-for-byte unchanged.
+type Grid = ('empty' | 'occupied' | 'void')[][];
 
 // ─── seedable RNG ────────────────────────────────────────────────────────
 //
@@ -115,9 +122,19 @@ function mulberry32(seed: number): () => number {
 // so we don't allocate the same tiny array on every loop iteration.
 const STEPS: ReadonlyArray<readonly [number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
-// Create a fresh HxW grid filled with 'empty'.
-function makeGrid(w: number, h: number): Grid {
-    return Array.from({ length: h }, () => Array<'empty' | 'occupied'>(w).fill('empty'));
+// Create a fresh HxW grid filled with 'empty'. When a shape `mask` is given
+// (length w*h, indexed y*w+x), cells where the mask is false become 'void'
+// (outside the shape) and are excluded from the puzzle.
+function makeGrid(w: number, h: number, mask?: boolean[]): Grid {
+    const grid: Grid = Array.from({ length: h }, () => Array<'empty' | 'occupied' | 'void'>(w).fill('empty'));
+    if (mask) {
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                if (!mask[y * w + x]) grid[y][x] = 'void';
+            }
+        }
+    }
+    return grid;
 }
 
 // "Is (x, y) actually inside the board?" — used every time we step off a cell
@@ -1057,16 +1074,20 @@ function fixSelfBlockedArrows(arrows: Arrow[], w: number, h: number): Arrow[] | 
 // ─────────────────────────────────────────────────────────────────────────
 const MAX_GEN_ATTEMPTS = 12;
 
-export function generateLevel(width = 9, height = 9, seed?: number): Level {
+export function generateLevel(width = 9, height = 9, seed?: number, mask?: boolean[]): Level {
     // Swap in a deterministic PRNG for the duration of a seeded call so
     // any failure surfaced in a test is reproducible from one integer.
     // Production callers omit `seed` → rng stays Math.random.
+    //
+    // `mask` (length width*height) restricts the puzzle to a shape; omit it
+    // for a classic rectangular board. The shape *id* is metadata stamped by
+    // the caller onto the returned Level — the generator only needs the mask.
     const prevRng = rng;
     if (seed !== undefined) rng = mulberry32(seed);
     try {
         let last: Level | null = null;
         for (let attempt = 0; attempt < MAX_GEN_ATTEMPTS; attempt++) {
-            const candidate = generateLevelOnce(width, height);
+            const candidate = generateLevelOnce(width, height, mask);
             const fixed = fixSelfBlockedArrows(candidate.arrows, width, height);
             if (fixed === null) { last = candidate; continue; }
             if (!isPuzzleSolvable(fixed, width, height)) { last = { ...candidate, arrows: fixed }; continue; }
@@ -1088,9 +1109,10 @@ export function generateLevel(width = 9, height = 9, seed?: number): Level {
 function generateLevelOnce(
     width: number,
     height: number,
+    mask?: boolean[],
 ): Level {
     // STAGE A — set up state.
-    const grid = makeGrid(width, height);   // fresh empty board
+    const grid = makeGrid(width, height, mask);   // fresh board (void = outside shape)
     const arrows: Arrow[] = [];              // the arrows we've placed so far
     let id = 0;                              // next arrow id to hand out
     let consecutiveFails = 0;                // how many seeds in a row failed
@@ -1135,24 +1157,29 @@ function generateLevelOnce(
     // the board so small boards still see a meaningful neighbourhood.
     const clusterRadius = Math.max(3, Math.floor(shortDimension * 0.35));
 
-    // STAGE C — build a shuffled spawn queue containing every cell.
-    // The main loop will walk through these as candidate seed positions.
+    // STAGE C — build a shuffled spawn queue of every FILLABLE cell. Void
+    // cells (outside the shape) are skipped so we never seed there. For a
+    // classic board every cell is fillable, identical to before.
     let spawnQueue: { x: number; y: number }[] = [];
+    let fillableCount = 0;
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
+            if (grid[y][x] !== 'empty') continue; // skip void
             spawnQueue.push({ x, y });
+            fillableCount++;
         }
     }
     spawnQueue = shuffle(spawnQueue);
     let queueIndex = 0;
 
     // Track empty cells with a counter instead of re-scanning the grid every
-    // iteration — matters a lot on the huge difficulties.
-    let emptyCount = width * height;
+    // iteration — matters a lot on the huge difficulties. Counts only fillable
+    // (in-shape) cells; void cells are never "empty".
+    let emptyCount = fillableCount;
 
     // Safety valve: if we go a very long time without any successful
     // placement, give up and let the cleanup passes finish things off.
-    const maxFails = width * height * 4;
+    const maxFails = fillableCount * 4;
 
     // ── STAGE D ── MAIN PLACEMENT LOOP ───────────────────────────────────
     // Keep trying to plant arrows until the board is full or we stall.

@@ -18,6 +18,7 @@ export interface ResumeData {
     markedRedIds: number[];
     lives:        number;
     difficulty:   string | null;
+    shape:        string | null; // shape id; null = classic rectangle
     W:            number;
     H:            number;
     totalArrows:  number;
@@ -36,6 +37,7 @@ function sanitizeResume(raw: unknown): ResumeData | null {
         markedRedIds: Array.isArray(r.markedRedIds) ? r.markedRedIds : [],
         lives:        r.lives,
         difficulty:   r.difficulty ?? null,
+        shape:        r.shape ?? null,
         W:            r.W,
         H:            r.H,
         totalArrows:  r.totalArrows ?? 0,

@@ -16,6 +16,7 @@ export interface Level {
   width: number;
   height: number;
   arrows: Arrow[];
+  shape?: string; // shape id (heart/diamond/circle); undefined = classic rectangle
 }
 
 // ─── animation types ──────────────────────────────────────────────────────────

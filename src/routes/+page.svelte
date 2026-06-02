@@ -8,7 +8,7 @@
 	import StatsScreen from '$lib/components/StatsScreen.svelte';
 
 	type StartRequest =
-		| { kind: 'new';    cells: number; square: boolean }
+		| { kind: 'new';    cells: number; square: boolean; shape?: string }
 		| { kind: 'resume' };
 
 	let gameState   = $state<'menu' | 'playing' | 'stats'>('menu');
@@ -27,8 +27,8 @@
 		return () => mq.removeEventListener('change', handler);
 	});
 
-	function startGame(cells: number, square: boolean) {
-		pendingRequest = { kind: 'new', cells, square };
+	function startGame(cells: number, square: boolean, shape?: string) {
+		pendingRequest = { kind: 'new', cells, square, shape };
 		gameState = 'playing';
 	}
 	function resumeGame() {

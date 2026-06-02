@@ -3,22 +3,43 @@
     import ResumeCard from '$lib/components/ResumeCard.svelte';
     import DifficultyButton from '$lib/components/DifficultyButton.svelte';
     import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+    import ShapeSheet from '$lib/components/ShapeSheet.svelte';
     import { trapFocus } from '$lib/utils/trapFocus';
     import { settings } from '$lib/stores/settings.svelte';
     import { progress as progressStore } from '$lib/stores/progress.svelte';
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
-    import { visibleDifficulties } from '$lib/config/difficulties';
+    import { visibleDifficulties, type Difficulty } from '$lib/config/difficulties';
+    import { eligibleShapes } from '$lib/config/shapes';
+    import { winsForDifficulty } from '$lib/utils/winKey';
 
     // Start screen. Owns its own little menuSettingsOpen overlay; everything
     // else (Resume card, difficulty buttons, Stats link) just emits.
 
     interface Props {
         reducedMotion: boolean;
-        onStart:      (cells: number, square: boolean) => void;
+        onStart:      (cells: number, square: boolean, shape?: string) => void;
         onResume:     () => void;
         onGoToStats: () => void;
     }
     let { reducedMotion, onStart, onResume, onGoToStats }: Props = $props();
+
+    // Difficulty → shape flow. Tapping a difficulty opens the shape sheet when
+    // more than just Classic is eligible at that size; otherwise it starts a
+    // classic game immediately (no pointless extra tap).
+    let shapeSheetFor = $state<Difficulty | null>(null);
+
+    function chooseDifficulty(d: Difficulty) {
+        if (eligibleShapes(d.cells).length <= 1) {
+            onStart(d.cells, d.square);      // only Classic eligible → start now
+        } else {
+            shapeSheetFor = d;               // let the player pick a shape
+        }
+    }
+    function pickShape(shapeId?: string) {
+        const d = shapeSheetFor;
+        shapeSheetFor = null;
+        if (d) onStart(d.cells, d.square, shapeId);
+    }
 
     const darkMode    = $derived(settings.darkMode);
     const progress    = $derived(progressStore.wins);
@@ -35,7 +56,7 @@
       style="padding-top: max(1.5rem, env(safe-area-inset-top))">
 
     <!-- Top row: centered title with gear button right-aligned -->
-    <div class="relative flex items-center justify-center shrink-0 h-11" inert={menuSettingsOpen}>
+    <div class="relative flex items-center justify-center shrink-0 h-11" inert={menuSettingsOpen || shapeSheetFor !== null}>
         <h1 class="text-3xl md:text-5xl font-extrabold {darkMode ? 'text-white' : 'text-slate-900'} tracking-tight">Super Arrow Out</h1>
         <button
             onclick={() => (menuSettingsOpen = true)}
@@ -55,7 +76,7 @@
     <!-- Centered content — overflow-y-auto + my-auto keeps items centred when
          they fit and lets them scroll when they don't (e.g. many difficulty
          buttons on a short screen). -->
-    <div class="flex-1 flex flex-col items-center overflow-y-auto" inert={menuSettingsOpen}>
+    <div class="flex-1 flex flex-col items-center overflow-y-auto" inert={menuSettingsOpen || shapeSheetFor !== null}>
         <div class="my-auto flex flex-col items-center gap-6 w-full py-4">
             <div class="flex flex-col gap-4 w-full max-w-xs">
                 {#if resumeState}
@@ -65,8 +86,8 @@
                 {#each difficulties as d}
                     <DifficultyButton
                         difficulty={d}
-                        wins={progress[d.label] ?? 0}
-                        onStart={() => onStart(d.cells, d.square)}
+                        wins={winsForDifficulty(progress, d.label)}
+                        onStart={() => chooseDifficulty(d)}
                     />
                 {/each}
             </div>
@@ -74,7 +95,7 @@
     </div>
 
     <!-- Stats button pinned to the bottom -->
-    <div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen}>
+    <div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen || shapeSheetFor !== null}>
         <button
             onclick={onGoToStats}
             class="{darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'} text-sm transition-colors flex items-center gap-1.5"
@@ -87,6 +108,17 @@
             Stats
         </button>
     </div>
+
+    <!-- Shape picker sheet (outside the inert page chrome) -->
+    {#if shapeSheetFor}
+        <ShapeSheet
+            difficultyLabel={shapeSheetFor.label}
+            targetCells={shapeSheetFor.cells}
+            {reducedMotion}
+            onPick={pickShape}
+            onClose={() => (shapeSheetFor = null)}
+        />
+    {/if}
 
     <!-- Settings overlay (outside the inert page chrome) -->
     {#if menuSettingsOpen}

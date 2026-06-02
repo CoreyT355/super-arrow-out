@@ -125,7 +125,9 @@
             </pattern>
             {#if shapePathD}
                 <clipPath id="shape-clip" clipPathUnits="userSpaceOnUse">
-                    <path d={shapePathD} clip-rule="evenodd" />
+                    <!-- nonzero winding (default): holes (ghost eyes) and
+                         overlapping facets (gem) both render like the source SVG -->
+                    <path d={shapePathD} />
                 </clipPath>
             {/if}
         </defs>

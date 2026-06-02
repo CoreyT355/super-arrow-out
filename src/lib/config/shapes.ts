@@ -29,8 +29,9 @@ export interface Shape {
     id:         string;   // derived from the .svg filename ('heart', 'star', …)
     label:      string;
     /** Sub-path rings normalized to the unit square [0,1]², filled with the
-     *  even-odd rule so a shape can have holes (e.g. the ghost's eyes) without
-     *  the sub-paths being joined by spurious edges. `null` = classic (rect). */
+     *  nonzero-winding rule (SVG default) so a shape can have holes (the ghost's
+     *  eyes) or overlapping facets (a gem) without the sub-paths being joined
+     *  by spurious edges. `null` = classic (rect). */
     polygon:    readonly (readonly Point[])[] | null;
     /** Natural width / height of the raw shape, before unit-square normalize.
      *  The grid sizing aims for w/h ≈ aspect so the shape isn't stretched. */
@@ -69,6 +70,28 @@ function titleCase(s: string): string {
     return s.replace(/(^|[-_])(\w)/g, (_, __, c) => ' ' + c.toUpperCase()).trim();
 }
 
+/** Convex hull (Andrew's monotone chain), counter-clockwise. Used for
+ *  `data-hull` shapes: a faceted icon (a D20, a gem) draws its outline as many
+ *  separate facet polygons split by thin edge gaps — under any fill rule that
+ *  rasterizes to a gappy, disconnected blob, not the solid silhouette a puzzle
+ *  needs. Taking the hull of all the points recovers the (convex) silhouette. */
+function convexHull(pts: readonly Point[]): Point[] {
+    if (pts.length < 3) return pts.map(p => [p[0], p[1]] as Point);
+    const p = pts.map(q => [q[0], q[1]] as Point).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o: Point, a: Point, b: Point) =>
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const half = (src: Point[]): Point[] => {
+        const out: Point[] = [];
+        for (const q of src) {
+            while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], q) <= 0) out.pop();
+            out.push(q);
+        }
+        out.pop();
+        return out;
+    };
+    return half(p).concat(half(p.slice().reverse()));
+}
+
 function buildShape(filePath: string, svg: string): Shape & { order: number } {
     const id = filePath.split('/').pop()!.replace(/\.svg$/i, '').toLowerCase();
     const d = svgToPath(svg);
@@ -78,9 +101,11 @@ function buildShape(filePath: string, svg: string): Shape & { order: number } {
     const b = bbox(rings.flat());
     const w = b.maxX - b.minX || 1;
     const h = b.maxY - b.minY || 1;
-    const polygon: Point[][] = rings.map(ring =>
+    let polygon: Point[][] = rings.map(ring =>
         ring.map(([x, y]) => [(x - b.minX) / w, (y - b.minY) / h] as Point),
     );
+    // `data-hull`: collapse a faceted icon to its solid convex silhouette.
+    if (svgAttr(svg, 'data-hull') != null) polygon = [convexHull(polygon.flat())];
 
     const minFilled = Number(svgAttr(svg, 'data-min-filled') ?? 60);
     const maxRaw    = svgAttr(svg, 'data-max-filled');
@@ -120,22 +145,30 @@ export function shapeById(id: string | undefined | null): Shape {
 
 // ─── point-in-polygon ──────────────────────────────────────────────────────
 
-/** Even-odd ray-casting test over a set of sub-path rings (each closed,
- *  last→first implied). Counting edge crossings across ALL rings gives the
- *  even-odd fill rule: interior holes (an odd nesting depth) read as outside,
- *  matching how the SVG itself renders. */
+/** Nonzero-winding point test over a set of sub-path rings (each closed,
+ *  last→first implied) — the SVG default fill rule. The winding number sums
+ *  signed edge crossings across ALL rings; a point is inside iff it's nonzero.
+ *  This matches how browsers render the source SVG, handling both cases:
+ *    • holes — a sub-path wound opposite the body cancels it (ghost eyes), and
+ *    • overlap — same-wound sub-paths union into a solid (a gem's facets).
+ *  (Even-odd would wrongly hole out overlapping facets.) */
 function pointInRings(px: number, py: number, rings: readonly (readonly Point[])[]): boolean {
-    let inside = false;
+    // isLeft > 0 if (px,py) is left of the directed edge a→b.
+    const isLeft = (ax: number, ay: number, bx: number, by: number) =>
+        (bx - ax) * (py - ay) - (px - ax) * (by - ay);
+    let wn = 0;
     for (const poly of rings) {
         for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const xj = poly[j][0], yj = poly[j][1]; // edge j → i
             const xi = poly[i][0], yi = poly[i][1];
-            const xj = poly[j][0], yj = poly[j][1];
-            const intersect = (yi > py) !== (yj > py)
-                && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi;
-            if (intersect) inside = !inside;
+            if (yj <= py) {
+                if (yi > py && isLeft(xj, yj, xi, yi) > 0) wn++;        // upward crossing, left
+            } else if (yi <= py && isLeft(xj, yj, xi, yi) < 0) {
+                wn--;                                                   // downward crossing, right
+            }
         }
     }
-    return inside;
+    return wn !== 0;
 }
 
 // ─── largest connected component ───────────────────────────────────────────

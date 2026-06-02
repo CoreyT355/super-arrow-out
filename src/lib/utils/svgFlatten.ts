@@ -255,9 +255,19 @@ function ellipseToPath(cx: number, cy: number, rx: number, ry: number): string {
 export function svgToPath(svg: string): string {
     const parts: string[] = [];
 
-    for (const m of svg.matchAll(/<path\b[^>]*\bd\s*=\s*"([^"]+)"/g)) parts.push(m[1]);
+    // Skip `fill="none"` elements — they're framing/guide shapes (e.g. an
+    // icon's transparent bounding rect), not silhouette geometry. Including
+    // one would add a full-rectangle ring that inverts the even-odd fill.
+    const isNone = (tag: string) => /\bfill\s*=\s*"\s*none\s*"/i.test(tag);
+
+    for (const m of svg.matchAll(/<path\b[^>]*>/g)) {
+        if (isNone(m[0])) continue;
+        const d = m[0].match(/\bd\s*=\s*"([^"]+)"/);
+        if (d) parts.push(d[1]);
+    }
 
     for (const m of svg.matchAll(/<(polygon|polyline)\b[^>]*\bpoints\s*=\s*"([^"]+)"/g)) {
+        if (isNone(m[0])) continue;
         const n = nums(m[2]);
         if (n.length >= 4) {
             let d = `M ${n[0]} ${n[1]}`;
@@ -268,17 +278,20 @@ export function svgToPath(svg: string): string {
     }
 
     for (const m of svg.matchAll(/<rect\b[^>]*>/g)) {
+        if (isNone(m[0])) continue;
         const x = attrNum(m[0], 'x'), y = attrNum(m[0], 'y');
         const w = attrNum(m[0], 'width'), h = attrNum(m[0], 'height');
         if (w > 0 && h > 0) parts.push(`M ${x} ${y} H ${x + w} V ${y + h} H ${x} Z`);
     }
 
     for (const m of svg.matchAll(/<circle\b[^>]*>/g)) {
+        if (isNone(m[0])) continue;
         const r = attrNum(m[0], 'r');
         if (r > 0) parts.push(ellipseToPath(attrNum(m[0], 'cx'), attrNum(m[0], 'cy'), r, r));
     }
 
     for (const m of svg.matchAll(/<ellipse\b[^>]*>/g)) {
+        if (isNone(m[0])) continue;
         const rx = attrNum(m[0], 'rx'), ry = attrNum(m[0], 'ry');
         if (rx > 0 && ry > 0) parts.push(ellipseToPath(attrNum(m[0], 'cx'), attrNum(m[0], 'cy'), rx, ry));
     }

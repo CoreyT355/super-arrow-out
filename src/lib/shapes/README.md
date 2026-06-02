@@ -28,6 +28,16 @@ path also renders as the shape's icon in the menu's shape picker.
   the bottom = larger y).
 - Keep it recognizable at low resolution — fine detail and very thin spikes
   vanish on smaller grids.
+- Multiple sub-paths fill by the **nonzero-winding rule** (the SVG default), so
+  a sub-path wound opposite the body reads as a hole (e.g. the ghost's eyes).
+- **Faceted icons** (a D20 die, a cut gem) draw their outline as many separate
+  facet polygons split by thin edge gaps — those rasterize to a gappy,
+  disconnected blob, not a solid shape. Add **`data-hull="true"`** to fill the
+  shape to its solid convex silhouette instead. The detailed path still renders
+  as the menu chip; only the play mask is solidified. (Hull = convex, so use it
+  for convex outlines — dice, gems, crystals.)
+- `fill="none"` elements (e.g. a transparent bounding-box rect some icon sets
+  include) are ignored automatically.
 
 ## Per-file metadata (attributes on the root `<svg>`)
 

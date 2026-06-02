@@ -44,7 +44,7 @@ All mask-awareness concentrates in the **generator**.
 | Access model | Difficulty × shape **matrix** |
 | Menu UX | Difficulty first → shape **bottom sheet**; Classic first/highlighted; skip sheet if only Classic is eligible |
 | Cell-count meaning | Difficulty count = target **filled (in-shape)** cells; iterate scale until filled ≈ target |
-| Aspect ratio | Each shape uses its **fixed natural aspect**, overriding viewport-adaptive sizing |
+| Aspect ratio | Grid uses the **viewport-adaptive aspect** (same as classic) so the board fills the same on-screen area; the shape is **contain-fit + centred** inside (undistorted), with the leftover band as out-of-shape padding. Pan/zoom therefore uses the whole area, not a small box. |
 | Eligibility | Per-shape **minimum filled-cell** threshold; a difficulty offers a shape only if its target clears the min |
 | Board look | Grid **clipped to mask** + **faint silhouette** behind; vortex fade rect also clipped |
 | Win attribution | **Per-shape** tracking via composite keys (`"Normal"` = classic, `"Normal#heart"` = shaped) |

@@ -251,16 +251,19 @@ import { winKey } from '$lib/utils/winKey';
             }
             // 'new'
             await tick(); // flush DOM so the loading overlay paints first
-            // Shaped puzzles size to a target *filled* cell count at the shape's
-            // fixed aspect; classic uses the existing viewport-aware sizing.
+            // Both paths size to the same viewport-aware grid aspect so the
+            // board rectangle fills the same on-screen area. Classic fills it
+            // with cells; shaped contain-fits the (undistorted) shape inside
+            // and pads the rest with out-of-shape cells, so pan/zoom still uses
+            // the whole area instead of a small box.
             const shapeObj = shapeById(request.shape);
+            const classic  = computeGridSize(request.cells, request.square);
             let w: number, h: number, m: boolean[] | null;
             if (shapeObj.polygon) {
-                const g = computeShapedGridSize(shapeObj, request.cells);
+                const g = computeShapedGridSize(shapeObj, request.cells, classic.w / classic.h);
                 w = g.w; h = g.h; m = g.mask;
             } else {
-                const g = computeGridSize(request.cells, request.square);
-                w = g.w; h = g.h; m = null;
+                w = classic.w; h = classic.h; m = null;
             }
             if (cancelled) return;
             W = w; H = h;

@@ -173,19 +173,40 @@ function keepLargestComponent(mask: boolean[], w: number, h: number): boolean[] 
     return mask;
 }
 
+// ─── shape placement (contain-fit) ──────────────────────────────────────────
+
+interface Placement { ox: number; oy: number; sw: number; sh: number; }
+
+/** Fit the shape's natural aspect inside a `w × h` grid WITHOUT distortion
+ *  (CSS `object-fit: contain`) and centre it. When the grid is taller/wider
+ *  than the shape (e.g. a square heart on a portrait phone) the leftover band
+ *  becomes out-of-shape padding, so the board rectangle can fill the whole
+ *  available area — and pan/zoom uses all of it — while the shape itself keeps
+ *  its proportions. Deterministic from (aspect, w, h), so resume re-derives the
+ *  identical mask. */
+function placeShape(aspect: number, w: number, h: number): Placement {
+    let sw = w, sh = w / aspect;
+    if (sh > h) { sh = h; sw = h * aspect; }
+    return { ox: (w - sw) / 2, oy: (h - sh) / 2, sw, sh };
+}
+
 // ─── public: rasterize ─────────────────────────────────────────────────────
 
-/** Boolean in-shape mask of length `w*h` (indexed `y*w + x`). A cell is in if
- *  its center is inside the polygon. Classic → all true. The result is reduced
- *  to its largest connected component. */
+/** Boolean in-shape mask of length `w*h` (indexed `y*w + x`). The shape is
+ *  contain-fit and centred in the grid (see `placeShape`); a cell is in iff its
+ *  centre falls inside the placed polygon. Classic → all true. The result is
+ *  reduced to its largest connected component. */
 export function rasterizeShape(shape: Shape, w: number, h: number): boolean[] {
     if (!shape.polygon) return new Array(w * h).fill(true); // classic
-    const mask = new Array<boolean>(w * h);
+    const { ox, oy, sw, sh } = placeShape(shape.aspect, w, h);
+    const mask = new Array<boolean>(w * h).fill(false);
     for (let y = 0; y < h; y++) {
-        const py = (y + 0.5) / h;
+        const v = (y + 0.5 - oy) / sh;
+        if (v < 0 || v > 1) continue; // padding row
         for (let x = 0; x < w; x++) {
-            const px = (x + 0.5) / w;
-            mask[y * w + x] = pointInRings(px, py, shape.polygon);
+            const u = (x + 0.5 - ox) / sw;
+            if (u < 0 || u > 1) continue; // padding column
+            mask[y * w + x] = pointInRings(u, v, shape.polygon);
         }
     }
     return keepLargestComponent(mask, w, h);
@@ -207,28 +228,39 @@ export interface ShapedGrid {
     filled: number;
 }
 
-/** Pick grid W×H (aspect ≈ shape.aspect) whose largest in-shape component is as
- *  close as possible to `targetFilled` cells. Classic returns the plain square
- *  grid identical to the existing computeGridSize square branch. */
-export function computeShapedGridSize(shape: Shape, targetFilled: number): ShapedGrid {
+/** Pick grid W×H whose largest in-shape component is as close as possible to
+ *  `targetFilled` cells. `targetAspect` is the grid's W/H — pass the viewport's
+ *  aspect (as classic difficulties do) so the board rectangle fills the same
+ *  area on screen; the shape is contain-fit and centred inside, with the
+ *  leftover band as out-of-shape padding. Defaults to the shape's own aspect
+ *  (no padding). Classic returns the plain square grid. */
+export function computeShapedGridSize(
+    shape: Shape, targetFilled: number, targetAspect = shape.aspect,
+): ShapedGrid {
     if (!shape.polygon) {
         const s = Math.max(2, Math.round(Math.sqrt(targetFilled)));
         const mask = new Array<boolean>(s * s).fill(true);
         return { w: s, h: s, mask, filled: s * s };
     }
 
-    // Estimate the bounding-box area from the polygon's fill ratio, then size
-    // to the shape's aspect: w = √(area·aspect), h = √(area/aspect).
+    // Seed the grid size analytically. The shape (aspect a, fill ratio f) is
+    // contain-fit into a W×H rect of aspect va = targetAspect, so its placed
+    // cell area is f·sw·sh. Whichever rect axis is the tighter fit determines
+    // the shape's size, giving a closed-form seed for W (then H = W/va).
     const fillRatio = Math.max(0.05, unitFillRatio(shape.polygon)); // fraction of unit square
+    const a = shape.aspect, va = Math.max(0.1, targetAspect);
     const sizeFor = (target: number): { w: number; h: number } => {
-        const area = target / fillRatio;
-        const w = Math.max(2, Math.round(Math.sqrt(area * shape.aspect)));
-        const h = Math.max(2, Math.round(Math.sqrt(area / shape.aspect)));
-        return { w, h };
+        let w: number, h: number;
+        if (a >= va) {            // width-limited: sw = W, sh = W/a
+            w = Math.sqrt((target * a) / fillRatio); h = w / va;
+        } else {                  // height-limited: sh = H, sw = H·a
+            h = Math.sqrt(target / (fillRatio * a)); w = h * va;
+        }
+        return { w: Math.max(2, Math.round(w)), h: Math.max(2, Math.round(h)) };
     };
 
-    // Start from the estimate and search nearby scales for the closest filled
-    // count. Rasterizing is cheap; a small symmetric search is plenty.
+    // Start from the estimate and search nearby scales (both axes together, so
+    // the grid keeps the target aspect) for the closest filled count.
     let best: ShapedGrid | null = null;
     const seed = sizeFor(targetFilled);
     for (let d = -3; d <= 6; d++) {
@@ -278,11 +310,13 @@ export function eligibleShapes(targetFilled: number): Shape[] {
  *  0..h). Classic → the full board rectangle. */
 export function shapePathInGrid(shape: Shape, w: number, h: number): string {
     if (!shape.polygon) return `M 0 0 H ${w} V ${h} H 0 Z`;
-    // One sub-path per ring; rendered with the even-odd fill/clip rule so the
+    // Contain-fit + centre identically to the mask (placeShape), then one
+    // sub-path per ring; rendered with the even-odd fill/clip rule so the
     // ghost's eyes (and any hole) cut through. See Board.svelte's clipPath.
+    const { ox, oy, sw, sh } = placeShape(shape.aspect, w, h);
     return shape.polygon
         .map(ring => {
-            const pts = ring.map(([x, y]) => `${(x * w).toFixed(3)} ${(y * h).toFixed(3)}`);
+            const pts = ring.map(([x, y]) => `${(ox + x * sw).toFixed(3)} ${(oy + y * sh).toFixed(3)}`);
             return `M ${pts.join(' L ')} Z`;
         })
         .join(' ');

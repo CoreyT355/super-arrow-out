@@ -136,6 +136,31 @@ describe('computeShapedGridSize', () => {
     }
 });
 
+describe('computeShapedGridSize — viewport aspect padding', () => {
+    // The board must fill the same on-screen area as classic, so a shape is
+    // padded out to the requested (viewport) aspect and centred, rather than
+    // sizing the grid to the shape's own aspect (which boxed pan/zoom in).
+    it('grid matches the target aspect, not the shape aspect', () => {
+        const heart = shapeById('heart');
+        const targetAspect = 0.5; // tall portrait phone
+        const g = computeShapedGridSize(heart, 300, targetAspect);
+        expect(Math.abs(g.w / g.h - targetAspect)).toBeLessThan(0.12);
+        // Still hits the filled target and stays one connected blob.
+        expect(g.filled).toBe(countFilled(g.mask));
+        expect(isConnected(g.mask, g.w, g.h)).toBe(true);
+        expect(Math.abs(g.filled - 300) / 300).toBeLessThan(0.2);
+        // The shape is contain-fit, so the rect has empty padding around it.
+        expect(g.filled).toBeLessThan(g.w * g.h * 0.85);
+    });
+
+    it('top rows are empty padding when the grid is taller than the shape', () => {
+        const g = computeShapedGridSize(shapeById('heart'), 300, 0.5);
+        // Whole first row should be out-of-shape (shape is centred lower down).
+        const firstRowEmpty = Array.from({ length: g.w }, (_, x) => g.mask[x]).every(v => !v);
+        expect(firstRowEmpty).toBe(true);
+    });
+});
+
 describe('eligibleShapes', () => {
     it('only classic at tiny sizes', () => {
         expect(eligibleShapes(10).map(s => s.id)).toEqual(['classic']);

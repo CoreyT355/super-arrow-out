@@ -20,8 +20,9 @@
         onStart:      (cells: number, square: boolean, shape?: string) => void;
         onResume:     () => void;
         onGoToStats: () => void;
+        onGoToAchievements: () => void;
     }
-    let { reducedMotion, onStart, onResume, onGoToStats }: Props = $props();
+    let { reducedMotion, onStart, onResume, onGoToStats, onGoToAchievements }: Props = $props();
 
     // Difficulty → shape flow. Tapping a difficulty opens the shape sheet when
     // more than just Classic is eligible at that size; otherwise it starts a
@@ -94,8 +95,8 @@
         </div>
     </div>
 
-    <!-- Stats button pinned to the bottom -->
-    <div class="shrink-0 flex justify-center pb-1" inert={menuSettingsOpen || shapeSheetFor !== null}>
+    <!-- Stats + Achievements buttons pinned to the bottom -->
+    <div class="shrink-0 flex justify-center gap-6 pb-1" inert={menuSettingsOpen || shapeSheetFor !== null}>
         <button
             onclick={onGoToStats}
             class="{darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'} text-sm transition-colors flex items-center gap-1.5"
@@ -106,6 +107,17 @@
                 <rect x="10" y="1" width="3" height="12" rx="0.5"/>
             </svg>
             Stats
+        </button>
+        <button
+            onclick={onGoToAchievements}
+            class="{darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700'} text-sm transition-colors flex items-center gap-1.5"
+        >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 3h12v4a6 6 0 0 1-12 0V3Z"/>
+                <path d="M6 5H3v1a4 4 0 0 0 4 4M18 5h3v1a4 4 0 0 1-4 4"/>
+                <path d="M9 21h6M12 17v4"/>
+            </svg>
+            Achievements
         </button>
     </div>
 

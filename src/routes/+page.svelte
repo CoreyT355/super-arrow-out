@@ -6,12 +6,13 @@
 	import MenuScreen from '$lib/components/MenuScreen.svelte';
 	import GameScreen from '$lib/components/GameScreen.svelte';
 	import StatsScreen from '$lib/components/StatsScreen.svelte';
+	import AchievementsScreen from '$lib/components/AchievementsScreen.svelte';
 
 	type StartRequest =
 		| { kind: 'new';    cells: number; square: boolean; shape?: string }
 		| { kind: 'resume' };
 
-	let gameState   = $state<'menu' | 'playing' | 'stats'>('menu');
+	let gameState   = $state<'menu' | 'playing' | 'stats' | 'achievements'>('menu');
 	let pendingRequest = $state<StartRequest>({ kind: 'new', cells: 81, square: true });
 
 	// OS-level reduce-motion preference. Gating the vortex / fly transitions
@@ -37,6 +38,7 @@
 	}
 	function goToMenu()  { gameState = 'menu'; }
 	function goToStats() { gameState = 'stats'; }
+	function goToAchievements() { gameState = 'achievements'; }
 </script>
 
 {#if gameState === 'menu'}
@@ -45,9 +47,12 @@
 		onStart={startGame}
 		onResume={resumeGame}
 		onGoToStats={goToStats}
+		onGoToAchievements={goToAchievements}
 	/>
 {:else if gameState === 'stats'}
 	<StatsScreen onBack={goToMenu} />
+{:else if gameState === 'achievements'}
+	<AchievementsScreen onBack={goToMenu} />
 {:else}
 	<!-- Keyed so navigating back to the menu and starting a new game
 	     unmounts and remounts GameScreen, resetting all its local state. -->

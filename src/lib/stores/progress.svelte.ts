@@ -6,6 +6,7 @@ import { loadJSON, saveJSON } from '$lib/utils/persisted';
 
 const WINS_KEY   = 'arrow-out-progress';
 const STREAK_KEY = 'arrow-out-streak';
+const LOSSES_KEY = 'arrow-out-losses';
 
 interface Streak {
     current: number;
@@ -28,12 +29,18 @@ function sanitizeStreak(raw: unknown): Streak | null {
     };
 }
 
+function sanitizeLosses(raw: unknown): number | null {
+    return typeof raw === 'number' && raw >= 0 ? raw : null;
+}
+
 const initialWins   = loadJSON<Record<string, number>>(WINS_KEY,   {}, sanitizeWins);
 const initialStreak = loadJSON<Streak>                (STREAK_KEY, STREAK_DEFAULTS, sanitizeStreak);
+const initialLosses = loadJSON<number>                (LOSSES_KEY, 0, sanitizeLosses);
 
 class ProgressStore {
     wins   = $state<Record<string, number>>(initialWins);
     streak = $state<Streak>(initialStreak);
+    losses = $state<number>(initialLosses);
 }
 
 export const progress = new ProgressStore();
@@ -45,6 +52,7 @@ if (typeof window !== 'undefined') {
     $effect.root(() => {
         $effect(() => { saveJSON(WINS_KEY,   progress.wins); });
         $effect(() => { saveJSON(STREAK_KEY, progress.streak); });
+        $effect(() => { saveJSON(LOSSES_KEY, progress.losses); });
     });
 }
 

@@ -13,8 +13,9 @@ path also renders as the shape's icon in the menu's shape picker.
 - `id` comes from the filename (`heart.svg` → `heart`).
 - The shape is scaled at play time to roughly match the chosen difficulty's
   target cell count, at the shape's own aspect ratio (it is never stretched).
-- After rasterizing, only the **largest connected region** is kept, so stray
-  islands are dropped automatically.
+- After rasterizing, **every substantial connected region** is kept and tiny
+  stray specks are dropped — so a solid shape keeps its body, and a multi-part
+  shape (a D20's facets) keeps all of its pieces.
 
 ## Authoring rules
 
@@ -30,12 +31,12 @@ path also renders as the shape's icon in the menu's shape picker.
   vanish on smaller grids.
 - Multiple sub-paths fill by the **nonzero-winding rule** (the SVG default), so
   a sub-path wound opposite the body reads as a hole (e.g. the ghost's eyes).
-- **Faceted icons** (a D20 die, a cut gem) draw their outline as many separate
-  facet polygons split by thin edge gaps — those rasterize to a gappy,
-  disconnected blob, not a solid shape. Add **`data-hull="true"`** to fill the
-  shape to its solid convex silhouette instead. The detailed path still renders
-  as the menu chip; only the play mask is solidified. (Hull = convex, so use it
-  for convex outlines — dice, gems, crystals.)
+- **Internal empty space and disconnected pieces are supported.** A faceted
+  icon like a D20 die draws each face as its own polygon, split by thin empty
+  edge lines — it rasterizes to several disconnected facets, and **every
+  substantial piece is kept** (only tiny rasterization specks are dropped). The
+  snakes fill each facet; the edges stay empty (transparent), like the ghost's
+  eyes. No special attribute needed — just drop the SVG in.
 - `fill="none"` elements (e.g. a transparent bounding-box rect some icon sets
   include) are ignored automatically.
 

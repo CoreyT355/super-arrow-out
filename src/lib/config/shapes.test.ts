@@ -36,6 +36,32 @@ function isConnected(mask: boolean[], w: number, h: number): boolean {
     return count === countFilled(mask);
 }
 
+// Sizes of all 4-connected components, largest first. A normal shape has one;
+// a multi-part shape (the D20's facets) has several substantial ones.
+function componentSizes(mask: boolean[], w: number, h: number): number[] {
+    const seen = new Uint8Array(w * h);
+    const sizes: number[] = [];
+    for (let s = 0; s < mask.length; s++) {
+        if (!mask[s] || seen[s]) continue;
+        let count = 0; const queue = [s]; seen[s] = 1; let head = 0;
+        while (head < queue.length) {
+            const k = queue[head++]; count++;
+            const x = k % w, y = (k - (k % w)) / w;
+            for (const n of [x > 0 ? k - 1 : -1, x < w - 1 ? k + 1 : -1, y > 0 ? k - w : -1, y < h - 1 ? k + w : -1]) {
+                if (n >= 0 && mask[n] && !seen[n]) { seen[n] = 1; queue.push(n); }
+            }
+        }
+        sizes.push(count);
+    }
+    return sizes.sort((a, b) => b - a);
+}
+
+// No stray rasterization specks: every component is a real, fillable piece.
+// Holds for both single-blob shapes and intentionally multi-part ones.
+function noTinyFragments(mask: boolean[], w: number, h: number): boolean {
+    return componentSizes(mask, w, h).every(n => n >= 4);
+}
+
 describe('shape catalog', () => {
     it('has classic first and the full shape set', () => {
         expect(SHAPES[0].id).toBe('classic');
@@ -67,7 +93,8 @@ describe('rasterizeShape', () => {
             const filled = countFilled(mask);
             expect(filled).toBeGreaterThan(0);
             expect(filled).toBeLessThan(w * h); // a real shape leaves corners empty
-            expect(isConnected(mask, w, h)).toBe(true);
+            // Multi-part shapes (D20 facets) are allowed; just no stray specks.
+            expect(noTinyFragments(mask, w, h)).toBe(true);
         });
 
         it(`${shape.id}: top corners are outside the mask`, () => {
@@ -90,10 +117,11 @@ describe('rasterizeShape', () => {
     }
 });
 
-describe('ghost holes (even-odd sub-paths)', () => {
+describe('ghost holes (nonzero-winding sub-paths)', () => {
     // Regression: the ghost's eyes are separate sub-paths. Flattening them into
     // one polygon used to join the body to each eye with spurious edges, which
-    // carved an empty triangle between the eyes. Rings + even-odd fixes it.
+    // carved an empty triangle between the eyes. Rings + nonzero winding (the
+    // eyes are wound opposite the body) fixes it.
     it('flattens to multiple rings (body + 2 eyes)', () => {
         expect(shapeById('ghost').polygon!.length).toBeGreaterThan(1);
     });
@@ -124,7 +152,7 @@ describe('computeShapedGridSize', () => {
             it(`${shape.id}: filled ≈ target (${target})`, () => {
                 const g = computeShapedGridSize(shape, target);
                 expect(g.filled).toBe(countFilled(g.mask));
-                expect(isConnected(g.mask, g.w, g.h)).toBe(true);
+                expect(noTinyFragments(g.mask, g.w, g.h)).toBe(true);
                 // Within 20% of the requested filled-cell count.
                 const err = Math.abs(g.filled - target) / target;
                 expect(err).toBeLessThan(0.2);

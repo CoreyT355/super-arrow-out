@@ -70,28 +70,6 @@ function titleCase(s: string): string {
     return s.replace(/(^|[-_])(\w)/g, (_, __, c) => ' ' + c.toUpperCase()).trim();
 }
 
-/** Convex hull (Andrew's monotone chain), counter-clockwise. Used for
- *  `data-hull` shapes: a faceted icon (a D20, a gem) draws its outline as many
- *  separate facet polygons split by thin edge gaps — under any fill rule that
- *  rasterizes to a gappy, disconnected blob, not the solid silhouette a puzzle
- *  needs. Taking the hull of all the points recovers the (convex) silhouette. */
-function convexHull(pts: readonly Point[]): Point[] {
-    if (pts.length < 3) return pts.map(p => [p[0], p[1]] as Point);
-    const p = pts.map(q => [q[0], q[1]] as Point).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    const cross = (o: Point, a: Point, b: Point) =>
-        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-    const half = (src: Point[]): Point[] => {
-        const out: Point[] = [];
-        for (const q of src) {
-            while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], q) <= 0) out.pop();
-            out.push(q);
-        }
-        out.pop();
-        return out;
-    };
-    return half(p).concat(half(p.slice().reverse()));
-}
-
 function buildShape(filePath: string, svg: string): Shape & { order: number } {
     const id = filePath.split('/').pop()!.replace(/\.svg$/i, '').toLowerCase();
     const d = svgToPath(svg);
@@ -101,11 +79,9 @@ function buildShape(filePath: string, svg: string): Shape & { order: number } {
     const b = bbox(rings.flat());
     const w = b.maxX - b.minX || 1;
     const h = b.maxY - b.minY || 1;
-    let polygon: Point[][] = rings.map(ring =>
+    const polygon: Point[][] = rings.map(ring =>
         ring.map(([x, y]) => [(x - b.minX) / w, (y - b.minY) / h] as Point),
     );
-    // `data-hull`: collapse a faceted icon to its solid convex silhouette.
-    if (svgAttr(svg, 'data-hull') != null) polygon = [convexHull(polygon.flat())];
 
     const minFilled = Number(svgAttr(svg, 'data-min-filled') ?? 60);
     const maxRaw    = svgAttr(svg, 'data-max-filled');
@@ -171,18 +147,30 @@ function pointInRings(px: number, py: number, rings: readonly (readonly Point[])
     return wn !== 0;
 }
 
-// ─── largest connected component ───────────────────────────────────────────
+// ─── connected-component cleanup ─────────────────────────────────────────────
 
-/** Keep only the largest 4-connected blob of `true` cells; clear the rest.
- *  Mutates and returns `mask`. */
-function keepLargestComponent(mask: boolean[], w: number, h: number): boolean[] {
+/** Fraction-of-largest below which a component is treated as rasterization
+ *  noise and dropped. A multi-part shape (a D20's facets, split by its empty
+ *  edge lines) keeps every substantial piece; a single-blob shape keeps its
+ *  one body and sheds stray edge specks. */
+const COMPONENT_KEEP_FRACTION = 0.1;
+const COMPONENT_MIN_CELLS = 4;
+
+/** Drop insignificant 4-connected blobs of `true` cells, keeping every
+ *  component that's ≥ COMPONENT_MIN_CELLS and ≥ 10% of the largest. This
+ *  preserves intentional disconnected pieces — e.g. a D20's facets, which are
+ *  separated by the die's empty edges — while still removing tiny specks left
+ *  by rasterizing a thin boundary. A normal solid shape has one component and
+ *  is unaffected. Holes inside a body (the ghost's eyes) aren't components, so
+ *  they're always preserved. Mutates and returns `mask`. */
+function keepSignificantComponents(mask: boolean[], w: number, h: number): boolean[] {
     const comp = new Int32Array(w * h).fill(-1);
-    let bestId = -1, bestSize = 0, nextId = 0;
+    const sizes: number[] = [];
     const queue: number[] = [];
 
     for (let start = 0; start < mask.length; start++) {
         if (!mask[start] || comp[start] !== -1) continue;
-        const id = nextId++;
+        const id = sizes.length;
         let size = 0;
         queue.length = 0;
         queue.push(start);
@@ -197,11 +185,14 @@ function keepLargestComponent(mask: boolean[], w: number, h: number): boolean[] 
             if (y > 0     && mask[k - w] && comp[k - w] === -1) { comp[k - w] = id; queue.push(k - w); }
             if (y < h - 1 && mask[k + w] && comp[k + w] === -1) { comp[k + w] = id; queue.push(k + w); }
         }
-        if (size > bestSize) { bestSize = size; bestId = id; }
+        sizes.push(size);
     }
 
-    if (bestId !== -1) {
-        for (let k = 0; k < mask.length; k++) if (comp[k] !== bestId) mask[k] = false;
+    if (sizes.length === 0) return mask;
+    const largest = Math.max(...sizes);
+    const minSize = Math.max(COMPONENT_MIN_CELLS, largest * COMPONENT_KEEP_FRACTION);
+    for (let k = 0; k < mask.length; k++) {
+        if (comp[k] !== -1 && sizes[comp[k]] < minSize) mask[k] = false;
     }
     return mask;
 }
@@ -227,8 +218,9 @@ function placeShape(aspect: number, w: number, h: number): Placement {
 
 /** Boolean in-shape mask of length `w*h` (indexed `y*w + x`). The shape is
  *  contain-fit and centred in the grid (see `placeShape`); a cell is in iff its
- *  centre falls inside the placed polygon. Classic → all true. The result is
- *  reduced to its largest connected component. */
+ *  centre falls inside the placed polygon. Classic → all true. Insignificant
+ *  stray components are dropped (see `keepSignificantComponents`); intentional
+ *  disconnected pieces like a D20's facets are kept. */
 export function rasterizeShape(shape: Shape, w: number, h: number): boolean[] {
     if (!shape.polygon) return new Array(w * h).fill(true); // classic
     const { ox, oy, sw, sh } = placeShape(shape.aspect, w, h);
@@ -242,7 +234,7 @@ export function rasterizeShape(shape: Shape, w: number, h: number): boolean[] {
             mask[y * w + x] = pointInRings(u, v, shape.polygon);
         }
     }
-    return keepLargestComponent(mask, w, h);
+    return keepSignificantComponents(mask, w, h);
 }
 
 /** Count of `true` cells in a mask. */

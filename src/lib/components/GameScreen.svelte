@@ -219,7 +219,13 @@ import { type AchievementStats } from '$lib/config/achievements';
                 delete pathRefs[id];
                 dirty = true;
             } else if (anim.phase === 'blocked-bounce' && el >= BOUNCE_MS) {
-                next[id] = { phase: 'blocked-flash', startTime: t };
+                // Keep the route fields: the flash re-renders through the same
+                // dash-on-route branch (held at rest), so the body must stay.
+                next[id] = {
+                    phase: 'blocked-flash', startTime: t,
+                    routeD: anim.routeD, L_total: anim.L_total,
+                    L_snake: anim.L_snake, restOffset: anim.restOffset,
+                };
                 lives = Math.max(0, lives - 1);
                 dirty = true;
             } else if (anim.phase === 'blocked-flash' && el >= FLASH_HALF * 4) {

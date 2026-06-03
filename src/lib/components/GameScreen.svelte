@@ -17,10 +17,7 @@
 
     import { settings } from '$lib/stores/settings.svelte';
     import { progress as progressStore } from '$lib/stores/progress.svelte';
-import { winKey, winsForDifficulty } from '$lib/utils/winKey';
-import { unlockAchievements } from '$lib/stores/achievements.svelte';
-import { showAchievementToasts } from '$lib/stores/toasts.svelte';
-import { type AchievementStats } from '$lib/config/achievements';
+    import { winKey } from '$lib/utils/winKey';
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
 
     import { DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
@@ -401,20 +398,6 @@ import { type AchievementStats } from '$lib/config/achievements';
     const progress = $derived(progressStore.wins);
     const streak   = $derived(progressStore.streak);
 
-    // Snapshot for achievement predicates. Reads the store directly (not the
-    // $derived views) so it reflects values written earlier in the same effect.
-    function currentStats(): AchievementStats {
-        const wins = progressStore.wins;
-        return {
-            totalWins:        Object.values(wins).reduce((a, b) => a + b, 0),
-            totalLosses:      progressStore.losses,
-            bestStreak:       progressStore.streak.best,
-            winsByDifficulty: Object.fromEntries(
-                DIFFICULTIES.map(d => [d.label, winsForDifficulty(wins, d.label)]),
-            ),
-        };
-    }
-
     $effect(() => {
         if (won && !winCounted && currentDifficulty !== null) {
             winCounted = true;
@@ -427,17 +410,14 @@ import { type AchievementStats } from '$lib/config/achievements';
                 current: streak.current + 1,
                 best:    Math.max(streak.best, streak.current + 1),
             };
-            showAchievementToasts(unlockAchievements(currentStats()));
         }
     });
 
-    // Reset the streak on loss; tally the loss.
+    // Reset the streak on loss.
     $effect(() => {
         if (lost && !lostCounted) {
             lostCounted = true;
             progressStore.streak = { current: 0, best: streak.best };
-            progressStore.losses = progressStore.losses + 1;
-            showAchievementToasts(unlockAchievements(currentStats()));
         }
     });
 

@@ -4,14 +4,16 @@
 // across refresh rates. Tweaking any of these changes player-perceptible
 // pacing — keep them in this one file so a single PR is the audit trail.
 
-/** Snake body moves one cell per this many ms during a blocked nudge. */
-export const MS_PER_STEP = 90;
+/** Blocked-tap bounce: one damped-spring recoil. The snake lurches a small,
+ *  FIXED distance toward the blocker, springs back past rest, and settles —
+ *  the same rigid slide-along-its-path motion as a drain, just tiny and
+ *  reversing, so it reads as "nope" instead of a half-finished exit. (The old
+ *  nudge slid forward by the full distance to the blocker, which looked like a
+ *  partial drain for far blockers.) */
+export const BOUNCE_MS = 380;
 
-/** How long a blocked arrow nudges toward the blocker before springing back. */
-export const NUDGE_FWD = 140;
-
-/** How long the spring-back to rest takes after the nudge. */
-export const NUDGE_BACK = 140;
+/** Peak forward lurch of the bounce, in cells. Small + fixed on purpose. */
+export const BOUNCE_CELLS = 0.42;
 
 /** Half-period of the red-flash penalty (×4 across the full flash cycle). */
 export const FLASH_HALF = 90;

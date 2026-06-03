@@ -26,8 +26,7 @@ import { type AchievementStats } from '$lib/config/achievements';
     import { DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
     import { shapeById, rasterizeShape, computeShapedGridSize, shapePathInGrid } from '$lib/config/shapes';
     import {
-        NUDGE_FWD,
-        NUDGE_BACK,
+        BOUNCE_MS,
         FLASH_HALF,
         VORTEX_DURATION,
     } from '$lib/constants/timing';
@@ -150,7 +149,7 @@ import { type AchievementStats } from '$lib/config/achievements';
         const arrow = level.arrows.find(a => a.id === id);
         if (!arrow) return;
 
-        const { blocked, dist } = checkBlocked(arrow, level.arrows, removed, anims, W, H);
+        const { blocked } = checkBlocked(arrow, level.arrows, removed, anims, W, H);
         const t = performance.now();
         now = t;
 
@@ -188,7 +187,7 @@ import { type AchievementStats } from '$lib/config/achievements';
             lives = Math.max(0, lives - 1);
             markedRed = new Set([...markedRed, id]);
         } else {
-            anims = { ...anims, [id]: { phase: 'blocked-fwd', startTime: t, maxSteps: dist + 0.5 } };
+            anims = { ...anims, [id]: { phase: 'blocked-bounce', startTime: t } };
         }
 
         if (rafId === null) rafId = requestAnimationFrame(loop);
@@ -209,10 +208,7 @@ import { type AchievementStats } from '$lib/config/achievements';
                 delete next[id]; nextRem.add(id);
                 delete pathRefs[id];
                 dirty = true;
-            } else if (anim.phase === 'blocked-fwd' && el >= NUDGE_FWD) {
-                next[id] = { phase: 'blocked-back', startTime: t, maxSteps: anim.maxSteps };
-                dirty = true;
-            } else if (anim.phase === 'blocked-back' && el >= NUDGE_BACK) {
+            } else if (anim.phase === 'blocked-bounce' && el >= BOUNCE_MS) {
                 next[id] = { phase: 'blocked-flash', startTime: t };
                 lives = Math.max(0, lives - 1);
                 dirty = true;

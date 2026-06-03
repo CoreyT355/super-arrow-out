@@ -24,12 +24,11 @@ export interface Level {
 // One Anim per arrow currently animating. The `phase` discriminates which
 // fields are populated:
 //
-//   exiting       — drain via stroke-dasharray + dashoffset along routeD.
-//   blocked-fwd   — initial nudge toward the blocker (eased out).
-//   blocked-back  — spring back to rest (eased in).
-//   blocked-flash — red-flash penalty before the arrow becomes inert.
+//   exiting        — drain via stroke-dasharray + dashoffset along routeD.
+//   blocked-bounce — damped-spring recoil toward the blocker and back.
+//   blocked-flash  — red-flash penalty before the arrow becomes inert.
 
-export type AnimPhase = 'exiting' | 'blocked-fwd' | 'blocked-back' | 'blocked-flash';
+export type AnimPhase = 'exiting' | 'blocked-bounce' | 'blocked-flash';
 
 export interface Anim {
     phase:       AnimPhase;

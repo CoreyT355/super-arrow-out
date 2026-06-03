@@ -3,8 +3,9 @@
     import { achievements as store } from '$lib/stores/achievements.svelte';
     import { ACHIEVEMENTS } from '$lib/config/achievements';
 
-    // Read-only list of every achievement with its locked / unlocked state.
-    // Secret achievements stay masked ("???") until earned.
+    // Discovered-only list: locked achievements are hidden entirely so they
+    // stay a surprise. We don't reveal a total count either — just how many
+    // you've uncovered so far, newest first.
 
     interface Props { onBack: () => void }
     let { onBack }: Props = $props();
@@ -13,24 +14,11 @@
     const unlocked = $derived(store.unlocked);
 
     const rows = $derived(
-        ACHIEVEMENTS.map(a => {
-            const isUnlocked = unlocked[a.id] != null;
-            const hidden = a.secret && !isUnlocked;
-            // Unlocked → the snarky flavor (the payoff). Locked → the plain
-            // requirement so you know what to chase. Secret → masked.
-            const description = hidden
-                ? 'Keep crawling to discover this one.'
-                : isUnlocked ? a.flavor : a.description;
-            return {
-                id:    a.id,
-                icon:  hidden ? '🔒' : a.icon,
-                title: hidden ? 'Secret Achievement' : a.title,
-                description,
-                isUnlocked,
-            };
-        }),
+        ACHIEVEMENTS
+            .filter(a => unlocked[a.id] != null)
+            .map(a => ({ id: a.id, icon: a.icon, title: a.title, flavor: a.flavor, at: unlocked[a.id] }))
+            .sort((x, y) => y.at - x.at), // most recently discovered first
     );
-    const earned = $derived(rows.filter(r => r.isUnlocked).length);
 </script>
 
 <main class="w-full h-dvh {darkMode ? 'bg-slate-900' : 'bg-slate-100'} flex flex-col overflow-hidden">
@@ -52,39 +40,41 @@
     <!-- Scrollable content -->
     <div class="flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-4 px-6 py-6 pb-[max(2rem,env(safe-area-inset-bottom))]">
 
-        <!-- Progress summary -->
-        <div class="w-full max-w-md flex items-center justify-between">
-            <span class="text-sm font-semibold uppercase tracking-widest {darkMode ? 'text-slate-400' : 'text-slate-500'}">Unlocked</span>
-            <span class="text-sm font-bold tabular-nums {darkMode ? 'text-white' : 'text-slate-900'}">{earned} / {rows.length}</span>
-        </div>
-        <div class="w-full max-w-md h-2 rounded-full overflow-hidden {darkMode ? 'bg-slate-800' : 'bg-slate-200'}">
-            <div class="h-full rounded-full bg-amber-500 transition-[width] duration-300"
-                 style="width: {rows.length ? (earned / rows.length) * 100 : 0}%"></div>
-        </div>
+        {#if rows.length === 0}
+            <!-- Empty state: hint that there's something to find -->
+            <div class="m-auto flex flex-col items-center text-center gap-3 max-w-xs">
+                <span class="text-5xl" aria-hidden="true">🔒</span>
+                <p class="text-base font-bold {darkMode ? 'text-white' : 'text-slate-900'}">Nothing discovered yet</p>
+                <p class="text-sm {darkMode ? 'text-slate-400' : 'text-slate-500'}">
+                    Achievements unlock as you play — win games, lose a few, push your streak. The System is watching. It's always watching.
+                </p>
+            </div>
+        {:else}
+            <!-- Discovered count (no total — locked ones stay secret) -->
+            <div class="w-full max-w-md flex items-center justify-between">
+                <span class="text-sm font-semibold uppercase tracking-widest {darkMode ? 'text-slate-400' : 'text-slate-500'}">Discovered</span>
+                <span class="text-sm font-bold tabular-nums {darkMode ? 'text-white' : 'text-slate-900'}">
+                    {rows.length} {rows.length === 1 ? 'achievement' : 'achievements'}
+                </span>
+            </div>
 
-        <!-- Achievement list -->
-        <div class="w-full max-w-md flex flex-col gap-2 mt-2">
-            {#each rows as row (row.id)}
-                <div
-                    class="flex items-center gap-3 px-4 py-3 rounded-2xl border transition-colors
-                           {row.isUnlocked
-                               ? (darkMode ? 'bg-slate-800 border-slate-700/60' : 'bg-white border-slate-200')
-                               : (darkMode ? 'bg-slate-800/40 border-slate-800' : 'bg-slate-100 border-slate-200/70')}
-                           {row.isUnlocked ? '' : 'opacity-60'}"
-                >
-                    <span class="text-2xl leading-none shrink-0 {row.isUnlocked ? '' : 'grayscale'}" aria-hidden="true">{row.icon}</span>
-                    <div class="min-w-0 flex-1">
-                        <p class="text-sm font-bold truncate {darkMode ? 'text-white' : 'text-slate-900'}">{row.title}</p>
-                        <p class="text-xs {darkMode ? 'text-slate-400' : 'text-slate-500'}">{row.description}</p>
-                    </div>
-                    {#if row.isUnlocked}
-                        <svg class="shrink-0 text-emerald-500" width="20" height="20" viewBox="0 0 24 24" fill="none"
+            <!-- Discovered list -->
+            <div class="w-full max-w-md flex flex-col gap-2">
+                {#each rows as row (row.id)}
+                    <div class="flex items-start gap-3 px-4 py-3 rounded-2xl border
+                                {darkMode ? 'bg-slate-800 border-slate-700/60' : 'bg-white border-slate-200'}">
+                        <span class="text-2xl leading-none shrink-0 mt-0.5" aria-hidden="true">{row.icon}</span>
+                        <div class="min-w-0 flex-1">
+                            <p class="text-sm font-bold {darkMode ? 'text-white' : 'text-slate-900'}">{row.title}</p>
+                            <p class="text-xs mt-0.5 {darkMode ? 'text-slate-400' : 'text-slate-500'}">{row.flavor}</p>
+                        </div>
+                        <svg class="shrink-0 mt-0.5 text-emerald-500" width="20" height="20" viewBox="0 0 24 24" fill="none"
                              stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-label="Unlocked">
                             <path d="M20 6 9 17l-5-5" />
                         </svg>
-                    {/if}
-                </div>
-            {/each}
-        </div>
+                    </div>
+                {/each}
+            </div>
+        {/if}
     </div>
 </main>

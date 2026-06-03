@@ -41,5 +41,7 @@ export interface Anim {
     L_snake?:    number;  // length of just the snake portion = the visible "dash"
     travel?:     number;  // how far the dash slides (≤ L_total − L_snake): capped
                           //   to the on-screen distance so off-screen travel is "free"
+    restOffset?: number;  // (blocked-bounce) dash offset at rest = the straight
+                          //   runway behind the tail; bounce slides around it
     durationMs?: number;  // total exit animation duration
 }

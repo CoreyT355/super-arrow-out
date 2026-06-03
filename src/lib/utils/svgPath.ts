@@ -126,3 +126,33 @@ export function buildFullRoute(
     }
     return roundedPath(pts, roundedCorners ? 0.4 : 0);
 }
+
+// ─── blocked-bounce route ───────────────────────────────────────────────────────
+
+/** Cells of straight runway added behind the tail so the recoil has somewhere
+ *  to slide. It's collinear with the last body segment, so it adds exactly this
+ *  many units to the path length (no corner rounding) — i.e. the body's tail
+ *  sits at arc-length BLOCKED_BACK_EXT in the route. */
+export const BLOCKED_BACK_EXT = 1;
+const BLOCKED_FWD_EXT = 2; // cells of runway ahead of the head for the lurch
+
+/** Build the short fixed route for the blocked-tap bounce. It's the body plus a
+ *  little straight runway behind the tail and ahead of the head, rounded ONCE —
+ *  so the bounce renders exactly like a drain (a snake-length dash sliding along
+ *  a fixed path) and flows around corners instead of cutting them. */
+export function buildBlockedRoute(arrow: Arrow, roundedCorners: boolean): string {
+    const dir  = DELTA[arrow.direction];
+    const N    = arrow.path.length;
+    const head = arrow.path[0];
+    const tail = arrow.path[N - 1];
+    // Straight continuation behind the tail (collinear with the last segment).
+    const back = N >= 2
+        ? { dx: tail.x - arrow.path[N - 2].x, dy: tail.y - arrow.path[N - 2].y }
+        : { dx: -dir.dx, dy: -dir.dy };
+
+    const pts: GridPos[] = [];
+    for (let k = BLOCKED_BACK_EXT; k >= 1; k--) pts.push({ x: tail.x + k * back.dx, y: tail.y + k * back.dy });
+    for (let i = N - 1; i >= 0; i--) pts.push(arrow.path[i]);
+    for (let k = 1; k <= BLOCKED_FWD_EXT; k++) pts.push({ x: head.x + k * dir.dx, y: head.y + k * dir.dy });
+    return roundedPath(pts, roundedCorners ? 0.4 : 0);
+}

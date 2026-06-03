@@ -12,7 +12,7 @@
     import { trapFocus } from '$lib/utils/trapFocus';
     import { generateLevel } from '$lib/utils/puzzleGenerator';
     import { generateInWorker } from '$lib/workers/workerBridge';
-    import { roundedPath, measurePath, buildFullRoute, drainDurationMs } from '$lib/utils/svgPath';
+    import { roundedPath, measurePath, buildFullRoute, buildBlockedRoute, drainDurationMs, BLOCKED_BACK_EXT } from '$lib/utils/svgPath';
     import { checkBlocked } from '$lib/utils/snakeMath';
 
     import { settings } from '$lib/stores/settings.svelte';
@@ -187,7 +187,17 @@ import { type AchievementStats } from '$lib/config/achievements';
             lives = Math.max(0, lives - 1);
             markedRed = new Set([...markedRed, id]);
         } else {
-            anims = { ...anims, [id]: { phase: 'blocked-bounce', startTime: t } };
+            // Render the bounce exactly like a drain: a snake-length dash
+            // sliding along a fixed, pre-rounded route. (The old per-frame
+            // point recompute cut corners and didn't match an exit.)
+            const routeD  = buildBlockedRoute(arrow, roundedCorners);
+            const snakeD  = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
+            const L_total = measurePath(routeD);
+            const L_snake = measurePath(snakeD);
+            anims = { ...anims, [id]: {
+                phase: 'blocked-bounce', startTime: t,
+                routeD, L_total, L_snake, restOffset: BLOCKED_BACK_EXT,
+            } };
         }
 
         if (rafId === null) rafId = requestAnimationFrame(loop);

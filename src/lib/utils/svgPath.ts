@@ -1,6 +1,33 @@
 import type { Arrow, GridPos } from '$lib/types';
 import { DELTA } from '$lib/constants/theme';
 import { exitCellCount } from './snakeMath';
+import {
+    EXIT_SPEED_PX_PER_MS, EXIT_MIN_DUR, EXIT_MAX_DUR,
+    CHARGE_MIN_MS, CHARGE_MAX_MS,
+} from '$lib/constants/timing';
+
+// ─── drain duration (constant on-screen speed) ─────────────────────────────────
+
+/** Wall-clock duration (ms) for a drain that slides `travel` grid units along
+ *  its route, animated at a CONSTANT on-screen speed. `pxPerCell` is the
+ *  rendered size of one grid cell in CSS pixels (board cell size × zoom);
+ *  pass 0/undefined before the board is measured to fall back to grid units.
+ *
+ *  Because duration scales with the pixels actually covered, every snake moves
+ *  at the same speed on screen — uniform within a board and across board sizes.
+ *  Clamped to [EXIT_MIN_DUR, EXIT_MAX_DUR] so tiny slides still read as motion
+ *  and screen-spanning ones never drag. */
+export function drainDurationMs(travel: number, pxPerCell: number): number {
+    const px = Math.max(0, travel) * (pxPerCell > 0 ? pxPerCell : 1);
+    return Math.max(EXIT_MIN_DUR, Math.min(EXIT_MAX_DUR, px / EXIT_SPEED_PX_PER_MS));
+}
+
+/** Duration (ms) for a blocked arrow to charge `distCells` to its blocker at
+ *  the same constant on-screen speed as a drain, clamped to the charge range. */
+export function chargeDurationMs(distCells: number, pxPerCell: number): number {
+    const px = Math.max(0, distCells) * (pxPerCell > 0 ? pxPerCell : 1);
+    return Math.max(CHARGE_MIN_MS, Math.min(CHARGE_MAX_MS, px / EXIT_SPEED_PX_PER_MS));
+}
 
 // ─── rounded snake path ──────────────────────────────────────────────────────
 
@@ -107,5 +134,39 @@ export function buildFullRoute(
     for (let k = 1; k <= extra; k++) {
         pts.push({ x: arrow.path[0].x + k * dir.dx, y: arrow.path[0].y + k * dir.dy });
     }
+    return roundedPath(pts, roundedCorners ? 0.4 : 0);
+}
+
+// ─── blocked-bounce route ───────────────────────────────────────────────────────
+
+/** Build the fixed route for the blocked-tap charge+bounce. It's the body plus
+ *  straight runway behind the tail (`backExt` cells, for the recoil) and ahead
+ *  of the head (`fwdExt` cells, enough to reach the blocker), rounded ONCE — so
+ *  it renders exactly like a drain (a snake-length dash sliding along a fixed
+ *  path) and flows around corners instead of cutting them. The forward runway
+ *  follows the exit ray, which is the straight line to the blocker.
+ *
+ *  `backExt` is collinear with the last body segment, so it adds exactly that
+ *  many units (no corner rounding): the body's tail sits at arc-length
+ *  `backExt`, which the caller passes as the dash's rest offset. */
+export function buildBlockedRoute(
+    arrow: Arrow,
+    roundedCorners: boolean,
+    fwdExt: number,
+    backExt: number,
+): string {
+    const dir  = DELTA[arrow.direction];
+    const N    = arrow.path.length;
+    const head = arrow.path[0];
+    const tail = arrow.path[N - 1];
+    // Straight continuation behind the tail (collinear with the last segment).
+    const back = N >= 2
+        ? { dx: tail.x - arrow.path[N - 2].x, dy: tail.y - arrow.path[N - 2].y }
+        : { dx: -dir.dx, dy: -dir.dy };
+
+    const pts: GridPos[] = [];
+    for (let k = backExt; k >= 1; k--) pts.push({ x: tail.x + k * back.dx, y: tail.y + k * back.dy });
+    for (let i = N - 1; i >= 0; i--) pts.push(arrow.path[i]);
+    for (let k = 1; k <= fwdExt; k++) pts.push({ x: head.x + k * dir.dx, y: head.y + k * dir.dy });
     return roundedPath(pts, roundedCorners ? 0.4 : 0);
 }

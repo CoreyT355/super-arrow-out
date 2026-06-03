@@ -1,8 +1,6 @@
 <script lang="ts">
     import type { Arrow, GridPos, Level, Anim } from '$lib/types';
-    import { roundedPath } from '$lib/utils/svgPath';
     import { computeS, isFlashRed } from '$lib/utils/animTiming';
-    import { segPos } from '$lib/utils/snakeMath';
     import { DELTA, DIR_ROT } from '$lib/constants/theme';
     import { VORTEX_FADE_MS, VORTEX_SPIN_MS } from '$lib/constants/timing';
     import { panZoom, type PanZoomState } from '$lib/actions/panZoom.svelte';
@@ -143,63 +141,43 @@
             {#if !removed.has(arrow.id)}
                 {#if anims[arrow.id]}
                     {@const anim = anims[arrow.id]}
-                    {#if anim.phase === 'exiting'}
-                        <!-- Drain animation: snake-length dash slides along extended route via stroke-dashoffset -->
-                        {@const el       = Math.max(0, now - anim.startTime)}
-                        {@const p        = Math.min(1, el / (anim.durationMs ?? 1))}
-                        {@const travel   = (anim.L_total ?? 0) - (anim.L_snake ?? 0)}
-                        {@const offset   = -p * travel}
-                        {@const headLen  = Math.min(anim.L_total ?? 0, (anim.L_snake ?? 0) + p * travel)}
-                        {@const ref      = pathRefs[arrow.id]}
-                        {@const headPt   = ref ? ref.getPointAtLength(headLen)
-                                               : { x: arrow.path[0].x + 0.5, y: arrow.path[0].y + 0.5 }}
-                        {@const aheadPt  = ref ? ref.getPointAtLength(Math.min(anim.L_total ?? 0, headLen + 0.1))
-                                               : { x: headPt.x + DELTA[arrow.direction].dx, y: headPt.y + DELTA[arrow.direction].dy }}
-                        {@const angle    = Math.atan2(aheadPt.y - headPt.y, aheadPt.x - headPt.x) * 180 / Math.PI}
-                        {@const color    = themeColor(arrow.id)}
-                        <g style="cursor:default;pointer-events:none" opacity={0.95}>
-                            <path
-                                bind:this={pathRefs[arrow.id]}
-                                d={anim.routeD}
-                                fill="none"
-                                stroke={color}
-                                stroke-width={0.14}
-                                stroke-linecap="round"
-                                stroke-linejoin={roundedCorners ? 'round' : 'miter'}
-                                stroke-dasharray="{anim.L_snake} {anim.L_total}"
-                                stroke-dashoffset={offset}
-                            />
-                            <polygon
-                                points="0.32,0 -0.16,-0.24 -0.16,0.24"
-                                transform="translate({headPt.x},{headPt.y}) rotate({angle})"
-                                fill={color}
-                            />
-                        </g>
-                    {:else}
-                        <!-- Blocked phases: rigid-body nudge / bounce / flash -->
-                        {@const d    = DELTA[arrow.direction]}
-                        {@const el   = Math.max(0, now - anim.startTime)}
-                        {@const s    = computeS(anim, el)}
-                        {@const pts  = arrow.path.map((_, k) => segPos(arrow.path, k, s, d))}
-                        {@const head = pts[0]}
-                        {@const red  = isFlashRed(anim, el)}
-                        {@const color = themeColor(arrow.id)}
-                        <g style="cursor:default;pointer-events:none" opacity={0.95}>
-                            <path
-                                d={roundedPath(pts, roundedCorners ? 0.4 : 0)}
-                                fill="none"
-                                stroke={red ? '#ef4444' : color}
-                                stroke-width={0.14}
-                                stroke-linecap="round"
-                                stroke-linejoin={roundedCorners ? 'round' : 'miter'}
-                            />
-                            <polygon
-                                points="0.32,0 -0.16,-0.24 -0.16,0.24"
-                                transform="translate({head.x + 0.5},{head.y + 0.5}) rotate({DIR_ROT[arrow.direction]})"
-                                fill={red ? '#ef4444' : color}
-                            />
-                        </g>
-                    {/if}
+                    <!-- Drain AND blocked-bounce/flash all render the same way: a
+                         snake-length dash sliding along a fixed pre-rounded route
+                         via stroke-dashoffset. Only `slide` (how far along the
+                         route) and the colour differ per phase. -->
+                    {@const el      = Math.max(0, now - anim.startTime)}
+                    {@const rest    = anim.restOffset ?? 0}
+                    {@const slide   = anim.phase === 'exiting'
+                                        ? Math.min(1, el / (anim.durationMs ?? 1))
+                                          * (anim.travel ?? (anim.L_total ?? 0) - (anim.L_snake ?? 0))
+                                        : rest + computeS(anim, el)}
+                    {@const offset  = -slide}
+                    {@const headLen = Math.min(anim.L_total ?? 0, Math.max(0, (anim.L_snake ?? 0) + slide))}
+                    {@const ref     = pathRefs[arrow.id]}
+                    {@const headPt  = ref ? ref.getPointAtLength(headLen)
+                                          : { x: arrow.path[0].x + 0.5, y: arrow.path[0].y + 0.5 }}
+                    {@const aheadPt = ref ? ref.getPointAtLength(Math.min(anim.L_total ?? 0, headLen + 0.1))
+                                          : { x: headPt.x + DELTA[arrow.direction].dx, y: headPt.y + DELTA[arrow.direction].dy }}
+                    {@const angle   = Math.atan2(aheadPt.y - headPt.y, aheadPt.x - headPt.x) * 180 / Math.PI}
+                    {@const color   = isFlashRed(anim, el) ? '#ef4444' : themeColor(arrow.id)}
+                    <g style="cursor:default;pointer-events:none" opacity={0.95}>
+                        <path
+                            bind:this={pathRefs[arrow.id]}
+                            d={anim.routeD}
+                            fill="none"
+                            stroke={color}
+                            stroke-width={0.14}
+                            stroke-linecap="round"
+                            stroke-linejoin={roundedCorners ? 'round' : 'miter'}
+                            stroke-dasharray="{anim.L_snake} {anim.L_total}"
+                            stroke-dashoffset={offset}
+                        />
+                        <polygon
+                            points="0.32,0 -0.16,-0.24 -0.16,0.24"
+                            transform="translate({headPt.x},{headPt.y}) rotate({angle})"
+                            fill={color}
+                        />
+                    </g>
                 {:else}
                     <!-- Static branch: pre-computed paths, zero per-frame cost -->
                     {@const sd        = staticArrowData[arrow.id]}

@@ -12,22 +12,19 @@
     import { trapFocus } from '$lib/utils/trapFocus';
     import { generateLevel } from '$lib/utils/puzzleGenerator';
     import { generateInWorker } from '$lib/workers/workerBridge';
-    import { roundedPath, measurePath, buildFullRoute } from '$lib/utils/svgPath';
-    import { checkBlocked, exitCellCount } from '$lib/utils/snakeMath';
+    import { roundedPath, measurePath, buildFullRoute, buildBlockedRoute, drainDurationMs, chargeDurationMs } from '$lib/utils/svgPath';
+    import { checkBlocked } from '$lib/utils/snakeMath';
 
     import { settings } from '$lib/stores/settings.svelte';
     import { progress as progressStore } from '$lib/stores/progress.svelte';
-import { winKey } from '$lib/utils/winKey';
+    import { winKey } from '$lib/utils/winKey';
     import { resume as resumeStore } from '$lib/stores/resume.svelte';
 
     import { DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
     import { shapeById, rasterizeShape, computeShapedGridSize, shapePathInGrid } from '$lib/config/shapes';
     import {
-        NUDGE_FWD,
-        NUDGE_BACK,
+        RECOIL_MS,
         FLASH_HALF,
-        EXIT_DURATION,
-        EXIT_MIN_DUR,
         VORTEX_DURATION,
     } from '$lib/constants/timing';
     import { COLORS_DARK, COLORS_LIGHT } from '$lib/constants/theme';
@@ -154,24 +151,57 @@ import { winKey } from '$lib/utils/winKey';
         now = t;
 
         if (!blocked) {
-            const exitCells = exitCellCount(arrow, W, H);
             const routeD    = buildFullRoute(arrow, W, H, roundedCorners);
             const snakeD    = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
             const L_total   = measurePath(routeD);
             const L_snake   = measurePath(snakeD);
-            const totalTravel = L_snake + exitCells;
-            const durationMs  = Math.max(EXIT_MIN_DUR, EXIT_DURATION * Math.min(1, totalTravel / 4));
+
+            // Constant on-screen speed, ignoring off-screen travel. The snake
+            // could slide `fullTravel` grid units to fully clear the GRID, but
+            // anything past the visible viewport is invisible — so we cap the
+            // animated slide at the on-screen distance (the visible span in the
+            // exit axis, plus the on-screen part of the body). Duration is then
+            // that distance ÷ a constant px/ms speed. At scale 1 the viewport is
+            // the whole board, so this equals the full slide (no early cut);
+            // zoomed in, the off-screen tail is "free" and drains stay snappy.
+            const fullTravel  = L_total - L_snake;
+            const scale       = panZoomState.scale > 0 ? panZoomState.scale : 1;
+            const horizontal  = arrow.direction === 'E' || arrow.direction === 'W';
+            const visibleSpan = (horizontal ? W : H) / scale;          // cells across the viewport
+            const N           = arrow.path.length;
+            const travel      = Math.min(fullTravel, visibleSpan + Math.min(N, visibleSpan));
+            const pxPerCell   = panZoomState.containerH > 0
+                ? (panZoomState.containerH / H) * scale
+                : 0;
+            const durationMs  = drainDurationMs(travel, pxPerCell);
 
             anims = { ...anims, [id]: {
                 phase: 'exiting', startTime: t,
-                routeD, L_total, L_snake, durationMs,
+                routeD, L_total, L_snake, travel, durationMs,
             } };
         } else if (reducedMotion) {
             // Skip nudge/bounce/flash entirely: apply penalty instantly.
             lives = Math.max(0, lives - 1);
             markedRed = new Set([...markedRed, id]);
         } else {
-            anims = { ...anims, [id]: { phase: 'blocked-fwd', startTime: t, maxSteps: dist + 0.5 } };
+            // Charge up to the blocker, then bounce back — rendered exactly like
+            // a drain (a snake-length dash sliding along a fixed, pre-rounded
+            // route). The head slides `chargeDist` cells along the exit ray (the
+            // straight line to the blocker), a hair into it for contact.
+            const chargeDist = dist + 0.3;
+            const pxPerCell  = panZoomState.containerH > 0
+                ? (panZoomState.containerH / H) * panZoomState.scale
+                : 0;
+            const approachMs = chargeDurationMs(chargeDist, pxPerCell); // constant speed + cap
+            const backExt    = Math.max(1, Math.ceil(chargeDist * 0.12)); // recoil headroom
+            const fwdExt     = Math.ceil(chargeDist) + 1;                 // reach the blocker
+            const routeD     = buildBlockedRoute(arrow, roundedCorners, fwdExt, backExt);
+            const snakeD     = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
+            anims = { ...anims, [id]: {
+                phase: 'blocked-bounce', startTime: t,
+                routeD, L_total: measurePath(routeD), L_snake: measurePath(snakeD),
+                restOffset: backExt, chargeDist, approachMs, durationMs: approachMs + RECOIL_MS,
+            } };
         }
 
         if (rafId === null) rafId = requestAnimationFrame(loop);
@@ -192,11 +222,14 @@ import { winKey } from '$lib/utils/winKey';
                 delete next[id]; nextRem.add(id);
                 delete pathRefs[id];
                 dirty = true;
-            } else if (anim.phase === 'blocked-fwd' && el >= NUDGE_FWD) {
-                next[id] = { phase: 'blocked-back', startTime: t, maxSteps: anim.maxSteps };
-                dirty = true;
-            } else if (anim.phase === 'blocked-back' && el >= NUDGE_BACK) {
-                next[id] = { phase: 'blocked-flash', startTime: t };
+            } else if (anim.phase === 'blocked-bounce' && el >= (anim.durationMs ?? 0)) {
+                // Keep the route fields: the flash re-renders through the same
+                // dash-on-route branch (held at rest), so the body must stay.
+                next[id] = {
+                    phase: 'blocked-flash', startTime: t,
+                    routeD: anim.routeD, L_total: anim.L_total,
+                    L_snake: anim.L_snake, restOffset: anim.restOffset,
+                };
                 lives = Math.max(0, lives - 1);
                 dirty = true;
             } else if (anim.phase === 'blocked-flash' && el >= FLASH_HALF * 4) {
@@ -364,6 +397,7 @@ import { winKey } from '$lib/utils/winKey';
     // Record a win once per session, advance the streak.
     const progress = $derived(progressStore.wins);
     const streak   = $derived(progressStore.streak);
+
     $effect(() => {
         if (won && !winCounted && currentDifficulty !== null) {
             winCounted = true;

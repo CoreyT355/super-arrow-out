@@ -24,12 +24,11 @@ export interface Level {
 // One Anim per arrow currently animating. The `phase` discriminates which
 // fields are populated:
 //
-//   exiting       — drain via stroke-dasharray + dashoffset along routeD.
-//   blocked-fwd   — initial nudge toward the blocker (eased out).
-//   blocked-back  — spring back to rest (eased in).
-//   blocked-flash — red-flash penalty before the arrow becomes inert.
+//   exiting        — drain via stroke-dasharray + dashoffset along routeD.
+//   blocked-bounce — damped-spring recoil toward the blocker and back.
+//   blocked-flash  — red-flash penalty before the arrow becomes inert.
 
-export type AnimPhase = 'exiting' | 'blocked-fwd' | 'blocked-back' | 'blocked-flash';
+export type AnimPhase = 'exiting' | 'blocked-bounce' | 'blocked-flash';
 
 export interface Anim {
     phase:       AnimPhase;
@@ -40,5 +39,11 @@ export interface Anim {
     routeD?:     string;  // SVG path string for the full route (tail → head → extension)
     L_total?:    number;  // total length of routeD in SVG units (cells)
     L_snake?:    number;  // length of just the snake portion = the visible "dash"
-    durationMs?: number;  // total exit animation duration
+    travel?:     number;  // how far the dash slides (≤ L_total − L_snake): capped
+                          //   to the on-screen distance so off-screen travel is "free"
+    restOffset?: number;  // (blocked-bounce) dash offset at rest = the straight
+                          //   runway behind the tail; bounce slides around it
+    chargeDist?: number;  // (blocked-bounce) cells the head slides to its blocker
+    approachMs?: number;  // (blocked-bounce) charge-in time; recoil = durationMs − this
+    durationMs?: number;  // total animation duration (exit, or charge + recoil)
 }

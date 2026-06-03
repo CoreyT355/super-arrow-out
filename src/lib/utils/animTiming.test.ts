@@ -1,39 +1,53 @@
 import { describe, it, expect } from 'vitest';
 import { computeS, isFlashRed } from './animTiming';
-import { NUDGE_FWD, NUDGE_BACK, FLASH_HALF } from '$lib/constants/timing';
+import { FLASH_HALF } from '$lib/constants/timing';
 import type { Anim } from '$lib/types';
 
-const FWD: Anim  = { phase: 'blocked-fwd',  startTime: 0, maxSteps: 4 };
-const BACK: Anim = { phase: 'blocked-back', startTime: 0, maxSteps: 4 };
+// A charge to a blocker 4 cells away: 200ms approach, 300ms recoil (500 total).
+const DIST = 4, APPROACH = 200, DURATION = 500;
+const CHARGE: Anim = {
+    phase: 'blocked-bounce', startTime: 0,
+    chargeDist: DIST, approachMs: APPROACH, durationMs: DURATION,
+};
 const FLASH: Anim = { phase: 'blocked-flash', startTime: 0 };
-const EXIT: Anim  = { phase: 'exiting',      startTime: 0 };
+const EXIT: Anim  = { phase: 'exiting',       startTime: 0 };
 
-describe('computeS', () => {
+describe('computeS (blocked charge + bounce)', () => {
     it('returns 0 when anim is undefined', () => {
         expect(computeS(undefined, 0)).toBe(0);
         expect(computeS(undefined, 1000)).toBe(0);
     });
 
-    it('returns 0 at the start of blocked-fwd and maxSteps at the end', () => {
-        expect(computeS(FWD, 0)).toBe(0);
-        expect(computeS(FWD, NUDGE_FWD)).toBe(4);
+    it('starts at rest and charges all the way to the blocker by approachMs', () => {
+        expect(computeS(CHARGE, 0)).toBeCloseTo(0, 6);
+        expect(computeS(CHARGE, APPROACH)).toBeCloseTo(DIST, 6); // reaches the blocker
     });
 
-    it('clamps blocked-fwd past the end of the nudge', () => {
-        expect(computeS(FWD, NUDGE_FWD * 5)).toBe(4);
+    it('the charge-in is monotonically increasing (no whip back mid-approach)', () => {
+        let prev = -1;
+        for (let el = 0; el <= APPROACH; el += 10) {
+            const s = computeS(CHARGE, el);
+            expect(s).toBeGreaterThanOrEqual(prev - 1e-9);
+            prev = s;
+        }
     });
 
-    it('returns maxSteps at the start of blocked-back and 0 at the end', () => {
-        expect(computeS(BACK, 0)).toBe(4);
-        expect(computeS(BACK, NUDGE_BACK)).toBe(0);
+    it('recoils past rest (negative) after impact, then settles to ~0', () => {
+        let min = Infinity;
+        for (let el = APPROACH; el <= DURATION; el += 5) min = Math.min(min, computeS(CHARGE, el));
+        expect(min).toBeLessThan(0);                 // bounces back past rest
+        expect(min).toBeGreaterThan(-DIST * 0.2);    // overshoot stays modest (<20%)
+        expect(computeS(CHARGE, DURATION)).toBeCloseTo(0, 2);   // settled
+        expect(computeS(CHARGE, DURATION * 3)).toBeCloseTo(0, 2); // clamped past the end
     });
 
-    it('handles blocked-fwd with maxSteps undefined as 0', () => {
-        const noMax: Anim = { phase: 'blocked-fwd', startTime: 0 };
-        expect(computeS(noMax, NUDGE_FWD)).toBe(0);
+    it('never overshoots the blocker on the way in', () => {
+        for (let el = 0; el <= APPROACH; el += 5) {
+            expect(computeS(CHARGE, el)).toBeLessThanOrEqual(DIST + 1e-9);
+        }
     });
 
-    it('returns 0 for non-blocked-nudge phases', () => {
+    it('returns 0 for non-bounce phases', () => {
         expect(computeS(FLASH, 50)).toBe(0);
         expect(computeS(EXIT, 50)).toBe(0);
     });
@@ -41,8 +55,7 @@ describe('computeS', () => {
 
 describe('isFlashRed', () => {
     it('returns false for non-flash phases', () => {
-        expect(isFlashRed(FWD, 0)).toBe(false);
-        expect(isFlashRed(BACK, 0)).toBe(false);
+        expect(isFlashRed(CHARGE, 0)).toBe(false);
         expect(isFlashRed(EXIT, 0)).toBe(false);
     });
 

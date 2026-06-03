@@ -1,36 +1,5 @@
-import type { Arrow, GridPos, Anim } from '$lib/types';
+import type { Arrow, Anim } from '$lib/types';
 import { DELTA } from '$lib/constants/theme';
-
-// ─── snake-flow math ──────────────────────────────────────────────────────────
-//
-// These helpers describe a snake "moving" along its path during the blocked
-// nudge — including imaginary cells extrapolated PAST the head in the exit
-// direction (used to project the snake forward while it's nudging into a
-// blocker). The blocked-arrow rendering branch uses these every RAF frame.
-
-/** Read path cell `i`, extrapolating past the head when `i < 0` along `d`. */
-export function extPos(
-    path: GridPos[],
-    i: number,
-    d: { dx: number; dy: number },
-): GridPos {
-    if (i >= 0) return path[i];
-    return { x: path[0].x + (-i) * d.dx, y: path[0].y + (-i) * d.dy };
-}
-
-/** Interpolated position of the snake's k-th body cell after sliding by `s`
- *  cells along the path. Lerps between two integer-shifted positions. */
-export function segPos(
-    path: GridPos[],
-    k: number,
-    s: number,
-    d: { dx: number; dy: number },
-): GridPos {
-    const lo = Math.floor(s), f = s - lo;
-    const a = extPos(path, k - lo,     d);
-    const b = extPos(path, k - lo - 1, d);
-    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
-}
 
 /** Number of cells from the arrow's head to the grid boundary, measured
  *  along its exit direction. Returns 1 when the head already sits on the

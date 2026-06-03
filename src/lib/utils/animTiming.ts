@@ -1,26 +1,34 @@
 import type { Anim } from '$lib/types';
-import { easeIn, easeOut } from './easing';
-import { NUDGE_FWD, NUDGE_BACK, FLASH_HALF } from '$lib/constants/timing';
+import { FLASH_HALF } from '$lib/constants/timing';
 
-// ─── step position for blocked phases ────────────────────────────────────────
+// ─── blocked charge + bounce offset ──────────────────────────────────────────
 //
-// The drain ("exiting") phase doesn't use these — it advances directly via
-// stroke-dasharray + stroke-dashoffset over a fixed wall-clock duration.
-// Only the blocked nudge needs a per-frame "how far has the arrow shifted
-// toward the blocker" value.
+// The drain ("exiting") phase doesn't use this — it advances directly via
+// stroke-dasharray + stroke-dashoffset. Only the blocked charge needs a
+// per-frame "how far has the head slid toward the blocker" value.
 
-/** Per-frame nudge offset (in cells) for the blocked-arrow animation.
- *
- *  `blocked-fwd` eases out from 0 → maxSteps over NUDGE_FWD ms.
- *  `blocked-back` eases in from maxSteps → 0 over NUDGE_BACK ms.
- *  Any other phase (including `exiting` and `blocked-flash`) returns 0. */
+/** Decelerating ease (fast → slow), for charging into the blocker. */
+const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
+
+// Recoil after impact: a damped cosine from the blocker back to rest, f(0) = 1,
+// settling to f(1) = 0 with a single small overshoot (~7% of the charge) past
+// rest. Positive = toward blocker, negative = recoil.
+const RECOIL_DAMP = 4.5;
+const RECOIL_FREQ = 1.5 * Math.PI;
+
+/** Per-frame charge offset (in cells) for a blocked arrow: slides 0 → chargeDist
+ *  (easeOut) over approachMs, then springs back to rest with a small overshoot
+ *  over the remaining time. Any other phase (exiting, blocked-flash) → 0. */
 export function computeS(anim: Anim | undefined, elapsed: number): number {
-    if (!anim) return 0;
-    if (anim.phase === 'blocked-fwd')
-        return easeOut(Math.min(elapsed / NUDGE_FWD, 1)) * (anim.maxSteps ?? 0);
-    if (anim.phase === 'blocked-back')
-        return (1 - easeIn(Math.min(elapsed / NUDGE_BACK, 1))) * (anim.maxSteps ?? 0);
-    return 0;
+    if (!anim || anim.phase !== 'blocked-bounce') return 0;
+    const dist       = anim.chargeDist ?? 0;
+    const approachMs = anim.approachMs ?? 0;
+    if (elapsed <= approachMs) {
+        return dist * easeOut(approachMs > 0 ? elapsed / approachMs : 1);
+    }
+    const recoilMs = (anim.durationMs ?? approachMs) - approachMs;
+    const q = recoilMs > 0 ? Math.min(1, (elapsed - approachMs) / recoilMs) : 1;
+    return dist * Math.exp(-RECOIL_DAMP * q) * Math.cos(RECOIL_FREQ * q);
 }
 
 /** Is the arrow currently in the "lit red" half of a flash cycle?

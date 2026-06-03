@@ -47,7 +47,7 @@
 		onGoToStats={goToStats}
 	/>
 {:else if gameState === 'stats'}
-	<StatsScreen onBack={goToMenu} />
+	<StatsScreen {reducedMotion} onBack={goToMenu} />
 {:else}
 	<!-- Keyed so navigating back to the menu and starting a new game
 	     unmounts and remounts GameScreen, resetting all its local state. -->

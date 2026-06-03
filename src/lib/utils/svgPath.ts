@@ -1,6 +1,23 @@
 import type { Arrow, GridPos } from '$lib/types';
 import { DELTA } from '$lib/constants/theme';
 import { exitCellCount } from './snakeMath';
+import { EXIT_SPEED_PX_PER_MS, EXIT_MIN_DUR, EXIT_MAX_DUR } from '$lib/constants/timing';
+
+// ─── drain duration (constant on-screen speed) ─────────────────────────────────
+
+/** Wall-clock duration (ms) for a drain that slides `travel` grid units along
+ *  its route, animated at a CONSTANT on-screen speed. `pxPerCell` is the
+ *  rendered size of one grid cell in CSS pixels (board cell size × zoom);
+ *  pass 0/undefined before the board is measured to fall back to grid units.
+ *
+ *  Because duration scales with the pixels actually covered, every snake moves
+ *  at the same speed on screen — uniform within a board and across board sizes.
+ *  Clamped to [EXIT_MIN_DUR, EXIT_MAX_DUR] so tiny slides still read as motion
+ *  and screen-spanning ones never drag. */
+export function drainDurationMs(travel: number, pxPerCell: number): number {
+    const px = Math.max(0, travel) * (pxPerCell > 0 ? pxPerCell : 1);
+    return Math.max(EXIT_MIN_DUR, Math.min(EXIT_MAX_DUR, px / EXIT_SPEED_PX_PER_MS));
+}
 
 // ─── rounded snake path ──────────────────────────────────────────────────────
 

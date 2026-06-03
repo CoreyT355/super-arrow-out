@@ -12,8 +12,8 @@
     import { trapFocus } from '$lib/utils/trapFocus';
     import { generateLevel } from '$lib/utils/puzzleGenerator';
     import { generateInWorker } from '$lib/workers/workerBridge';
-    import { roundedPath, measurePath, buildFullRoute } from '$lib/utils/svgPath';
-    import { checkBlocked, exitCellCount } from '$lib/utils/snakeMath';
+    import { roundedPath, measurePath, buildFullRoute, drainDurationMs } from '$lib/utils/svgPath';
+    import { checkBlocked } from '$lib/utils/snakeMath';
 
     import { settings } from '$lib/stores/settings.svelte';
     import { progress as progressStore } from '$lib/stores/progress.svelte';
@@ -29,8 +29,6 @@ import { type AchievementStats } from '$lib/config/achievements';
         NUDGE_FWD,
         NUDGE_BACK,
         FLASH_HALF,
-        EXIT_DURATION,
-        EXIT_MIN_DUR,
         VORTEX_DURATION,
     } from '$lib/constants/timing';
     import { COLORS_DARK, COLORS_LIGHT } from '$lib/constants/theme';
@@ -157,13 +155,19 @@ import { type AchievementStats } from '$lib/config/achievements';
         now = t;
 
         if (!blocked) {
-            const exitCells = exitCellCount(arrow, W, H);
             const routeD    = buildFullRoute(arrow, W, H, roundedCorners);
             const snakeD    = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
             const L_total   = measurePath(routeD);
             const L_snake   = measurePath(snakeD);
-            const totalTravel = L_snake + exitCells;
-            const durationMs  = Math.max(EXIT_MIN_DUR, EXIT_DURATION * Math.min(1, totalTravel / 4));
+
+            // Constant on-screen speed: the snake slides `travel` grid units;
+            // convert to pixels (cell size × zoom) so the duration tracks the
+            // distance actually covered on screen (see drainDurationMs).
+            const travel     = L_total - L_snake;
+            const pxPerCell  = panZoomState.containerH > 0
+                ? (panZoomState.containerH / H) * panZoomState.scale
+                : 0;
+            const durationMs = drainDurationMs(travel, pxPerCell);
 
             anims = { ...anims, [id]: {
                 phase: 'exiting', startTime: t,

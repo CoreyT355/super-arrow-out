@@ -16,11 +16,18 @@ export const NUDGE_BACK = 140;
 /** Half-period of the red-flash penalty (×4 across the full flash cycle). */
 export const FLASH_HALF = 90;
 
-/** Drain duration cap. Snakes always exit in the same wall-clock time
- *  regardless of length — short snakes look slow, long ones look like a
- *  whip. EXIT_MIN_DUR keeps the very shortest exits from looking instant. */
-export const EXIT_DURATION = 450;
-export const EXIT_MIN_DUR  = 220;
+/** Drain speed model: snakes exit at a CONSTANT on-screen speed, so the
+ *  animation looks uniform within a board and across board sizes (the duration
+ *  is derived from how far the snake slides in pixels, not a fixed time).
+ *
+ *  - EXIT_SPEED_PX_PER_MS — on-screen drain speed (pixels per millisecond).
+ *  - EXIT_MIN_DUR — floor so a tiny slide (a few px on a huge board) still
+ *    reads as motion rather than a pop.
+ *  - EXIT_MAX_DUR — ceiling so a screen-spanning drain (or a zoomed-in long
+ *    one) never drags. A full-screen slide lands a touch under this. */
+export const EXIT_SPEED_PX_PER_MS = 1.1;
+export const EXIT_MIN_DUR = 200;
+export const EXIT_MAX_DUR = 700;
 
 /** Total win-collapse animation. */
 export const VORTEX_DURATION = 2000;

@@ -1,29 +1,34 @@
 import type { Anim } from '$lib/types';
-import { BOUNCE_MS, BOUNCE_CELLS, FLASH_HALF } from '$lib/constants/timing';
+import { FLASH_HALF } from '$lib/constants/timing';
 
-// ─── step position for blocked phases ────────────────────────────────────────
+// ─── blocked charge + bounce offset ──────────────────────────────────────────
 //
-// The drain ("exiting") phase doesn't use these — it advances directly via
-// stroke-dasharray + stroke-dashoffset over a fixed wall-clock duration.
-// Only the blocked bounce needs a per-frame "how far has the arrow shifted
-// toward the blocker" value.
+// The drain ("exiting") phase doesn't use this — it advances directly via
+// stroke-dasharray + stroke-dashoffset. Only the blocked charge needs a
+// per-frame "how far has the head slid toward the blocker" value.
 
-// Damped-spring shape for the bounce: f(p) = e^(-DAMP·p)·sin(FREQ·p) over
-// p ∈ [0, 1]. FREQ = 3π gives 1.5 oscillations (lurch → recoil → settle) and
-// lands exactly on 0 at p = 1; NORM is f's peak so BOUNCE_CELLS is the real
-// peak lurch in cells. Positive = toward the blocker, negative = recoil.
-const BOUNCE_DAMP = 4;
-const BOUNCE_FREQ = 3 * Math.PI;
-const BOUNCE_NORM = 0.561;
+/** Decelerating ease (fast → slow), for charging into the blocker. */
+const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
 
-/** Per-frame bounce offset (in cells) for a blocked arrow.
- *
- *  `blocked-bounce` runs a fixed-amplitude damped spring over BOUNCE_MS.
- *  Any other phase (including `exiting` and `blocked-flash`) returns 0. */
+// Recoil after impact: a damped cosine from the blocker back to rest, f(0) = 1,
+// settling to f(1) = 0 with a single small overshoot (~7% of the charge) past
+// rest. Positive = toward blocker, negative = recoil.
+const RECOIL_DAMP = 4.5;
+const RECOIL_FREQ = 1.5 * Math.PI;
+
+/** Per-frame charge offset (in cells) for a blocked arrow: slides 0 → chargeDist
+ *  (easeOut) over approachMs, then springs back to rest with a small overshoot
+ *  over the remaining time. Any other phase (exiting, blocked-flash) → 0. */
 export function computeS(anim: Anim | undefined, elapsed: number): number {
     if (!anim || anim.phase !== 'blocked-bounce') return 0;
-    const p = Math.min(elapsed / BOUNCE_MS, 1);
-    return (BOUNCE_CELLS / BOUNCE_NORM) * Math.exp(-BOUNCE_DAMP * p) * Math.sin(BOUNCE_FREQ * p);
+    const dist       = anim.chargeDist ?? 0;
+    const approachMs = anim.approachMs ?? 0;
+    if (elapsed <= approachMs) {
+        return dist * easeOut(approachMs > 0 ? elapsed / approachMs : 1);
+    }
+    const recoilMs = (anim.durationMs ?? approachMs) - approachMs;
+    const q = recoilMs > 0 ? Math.min(1, (elapsed - approachMs) / recoilMs) : 1;
+    return dist * Math.exp(-RECOIL_DAMP * q) * Math.cos(RECOIL_FREQ * q);
 }
 
 /** Is the arrow currently in the "lit red" half of a flash cycle?

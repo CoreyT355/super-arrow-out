@@ -12,7 +12,7 @@
     import { trapFocus } from '$lib/utils/trapFocus';
     import { generateLevel } from '$lib/utils/puzzleGenerator';
     import { generateInWorker } from '$lib/workers/workerBridge';
-    import { roundedPath, measurePath, buildFullRoute, buildBlockedRoute, drainDurationMs, BLOCKED_BACK_EXT } from '$lib/utils/svgPath';
+    import { roundedPath, measurePath, buildFullRoute, buildBlockedRoute, drainDurationMs, chargeDurationMs } from '$lib/utils/svgPath';
     import { checkBlocked } from '$lib/utils/snakeMath';
 
     import { settings } from '$lib/stores/settings.svelte';
@@ -26,7 +26,7 @@ import { type AchievementStats } from '$lib/config/achievements';
     import { DIFFICULTIES, computeGridSize } from '$lib/config/difficulties';
     import { shapeById, rasterizeShape, computeShapedGridSize, shapePathInGrid } from '$lib/config/shapes';
     import {
-        BOUNCE_MS,
+        RECOIL_MS,
         FLASH_HALF,
         VORTEX_DURATION,
     } from '$lib/constants/timing';
@@ -149,7 +149,7 @@ import { type AchievementStats } from '$lib/config/achievements';
         const arrow = level.arrows.find(a => a.id === id);
         if (!arrow) return;
 
-        const { blocked } = checkBlocked(arrow, level.arrows, removed, anims, W, H);
+        const { blocked, dist } = checkBlocked(arrow, level.arrows, removed, anims, W, H);
         const t = performance.now();
         now = t;
 
@@ -187,16 +187,23 @@ import { type AchievementStats } from '$lib/config/achievements';
             lives = Math.max(0, lives - 1);
             markedRed = new Set([...markedRed, id]);
         } else {
-            // Render the bounce exactly like a drain: a snake-length dash
-            // sliding along a fixed, pre-rounded route. (The old per-frame
-            // point recompute cut corners and didn't match an exit.)
-            const routeD  = buildBlockedRoute(arrow, roundedCorners);
-            const snakeD  = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
-            const L_total = measurePath(routeD);
-            const L_snake = measurePath(snakeD);
+            // Charge up to the blocker, then bounce back — rendered exactly like
+            // a drain (a snake-length dash sliding along a fixed, pre-rounded
+            // route). The head slides `chargeDist` cells along the exit ray (the
+            // straight line to the blocker), a hair into it for contact.
+            const chargeDist = dist + 0.3;
+            const pxPerCell  = panZoomState.containerH > 0
+                ? (panZoomState.containerH / H) * panZoomState.scale
+                : 0;
+            const approachMs = chargeDurationMs(chargeDist, pxPerCell); // constant speed + cap
+            const backExt    = Math.max(1, Math.ceil(chargeDist * 0.12)); // recoil headroom
+            const fwdExt     = Math.ceil(chargeDist) + 1;                 // reach the blocker
+            const routeD     = buildBlockedRoute(arrow, roundedCorners, fwdExt, backExt);
+            const snakeD     = roundedPath([...arrow.path].reverse(), roundedCorners ? 0.4 : 0);
             anims = { ...anims, [id]: {
                 phase: 'blocked-bounce', startTime: t,
-                routeD, L_total, L_snake, restOffset: BLOCKED_BACK_EXT,
+                routeD, L_total: measurePath(routeD), L_snake: measurePath(snakeD),
+                restOffset: backExt, chargeDist, approachMs, durationMs: approachMs + RECOIL_MS,
             } };
         }
 
@@ -218,7 +225,7 @@ import { type AchievementStats } from '$lib/config/achievements';
                 delete next[id]; nextRem.add(id);
                 delete pathRefs[id];
                 dirty = true;
-            } else if (anim.phase === 'blocked-bounce' && el >= BOUNCE_MS) {
+            } else if (anim.phase === 'blocked-bounce' && el >= (anim.durationMs ?? 0)) {
                 // Keep the route fields: the flash re-renders through the same
                 // dash-on-route branch (held at rest), so the body must stay.
                 next[id] = {

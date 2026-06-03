@@ -1,43 +1,49 @@
 import { describe, it, expect } from 'vitest';
 import { computeS, isFlashRed } from './animTiming';
-import { BOUNCE_MS, BOUNCE_CELLS, FLASH_HALF } from '$lib/constants/timing';
+import { FLASH_HALF } from '$lib/constants/timing';
 import type { Anim } from '$lib/types';
 
-const BOUNCE: Anim = { phase: 'blocked-bounce', startTime: 0 };
-const FLASH: Anim  = { phase: 'blocked-flash',  startTime: 0 };
-const EXIT: Anim   = { phase: 'exiting',        startTime: 0 };
+// A charge to a blocker 4 cells away: 200ms approach, 300ms recoil (500 total).
+const DIST = 4, APPROACH = 200, DURATION = 500;
+const CHARGE: Anim = {
+    phase: 'blocked-bounce', startTime: 0,
+    chargeDist: DIST, approachMs: APPROACH, durationMs: DURATION,
+};
+const FLASH: Anim = { phase: 'blocked-flash', startTime: 0 };
+const EXIT: Anim  = { phase: 'exiting',       startTime: 0 };
 
-describe('computeS (blocked bounce)', () => {
+describe('computeS (blocked charge + bounce)', () => {
     it('returns 0 when anim is undefined', () => {
         expect(computeS(undefined, 0)).toBe(0);
         expect(computeS(undefined, 1000)).toBe(0);
     });
 
-    it('starts and ends at rest (0)', () => {
-        expect(computeS(BOUNCE, 0)).toBeCloseTo(0, 6);
-        expect(computeS(BOUNCE, BOUNCE_MS)).toBeCloseTo(0, 3);
-        // clamps past the end
-        expect(computeS(BOUNCE, BOUNCE_MS * 3)).toBeCloseTo(0, 3);
+    it('starts at rest and charges all the way to the blocker by approachMs', () => {
+        expect(computeS(CHARGE, 0)).toBeCloseTo(0, 6);
+        expect(computeS(CHARGE, APPROACH)).toBeCloseTo(DIST, 6); // reaches the blocker
     });
 
-    it('lurches toward the blocker first (positive), peaking near BOUNCE_CELLS', () => {
-        // Sample the first ~third: should go positive and reach ~the amplitude.
-        let peak = 0;
-        for (let el = 0; el <= BOUNCE_MS / 3; el += 2) peak = Math.max(peak, computeS(BOUNCE, el));
-        expect(peak).toBeGreaterThan(0);
-        expect(peak).toBeCloseTo(BOUNCE_CELLS, 1); // within ~0.05 cells of the target peak
+    it('the charge-in is monotonically increasing (no whip back mid-approach)', () => {
+        let prev = -1;
+        for (let el = 0; el <= APPROACH; el += 10) {
+            const s = computeS(CHARGE, el);
+            expect(s).toBeGreaterThanOrEqual(prev - 1e-9);
+            prev = s;
+        }
     });
 
-    it('recoils back past rest (goes negative) after the lurch', () => {
+    it('recoils past rest (negative) after impact, then settles to ~0', () => {
         let min = Infinity;
-        for (let el = 0; el <= BOUNCE_MS; el += 2) min = Math.min(min, computeS(BOUNCE, el));
-        expect(min).toBeLessThan(0);            // there is a backward recoil
-        expect(min).toBeGreaterThan(-BOUNCE_CELLS); // but smaller than the forward lurch
+        for (let el = APPROACH; el <= DURATION; el += 5) min = Math.min(min, computeS(CHARGE, el));
+        expect(min).toBeLessThan(0);                 // bounces back past rest
+        expect(min).toBeGreaterThan(-DIST * 0.2);    // overshoot stays modest (<20%)
+        expect(computeS(CHARGE, DURATION)).toBeCloseTo(0, 2);   // settled
+        expect(computeS(CHARGE, DURATION * 3)).toBeCloseTo(0, 2); // clamped past the end
     });
 
-    it('never exceeds the forward amplitude by much', () => {
-        for (let el = 0; el <= BOUNCE_MS; el += 2) {
-            expect(Math.abs(computeS(BOUNCE, el))).toBeLessThan(BOUNCE_CELLS + 0.02);
+    it('never overshoots the blocker on the way in', () => {
+        for (let el = 0; el <= APPROACH; el += 5) {
+            expect(computeS(CHARGE, el)).toBeLessThanOrEqual(DIST + 1e-9);
         }
     });
 
@@ -49,7 +55,7 @@ describe('computeS (blocked bounce)', () => {
 
 describe('isFlashRed', () => {
     it('returns false for non-flash phases', () => {
-        expect(isFlashRed(BOUNCE, 0)).toBe(false);
+        expect(isFlashRed(CHARGE, 0)).toBe(false);
         expect(isFlashRed(EXIT, 0)).toBe(false);
     });
 

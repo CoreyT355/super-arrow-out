@@ -43,5 +43,7 @@ export interface Anim {
                           //   to the on-screen distance so off-screen travel is "free"
     restOffset?: number;  // (blocked-bounce) dash offset at rest = the straight
                           //   runway behind the tail; bounce slides around it
-    durationMs?: number;  // total exit animation duration
+    chargeDist?: number;  // (blocked-bounce) cells the head slides to its blocker
+    approachMs?: number;  // (blocked-bounce) charge-in time; recoil = durationMs − this
+    durationMs?: number;  // total animation duration (exit, or charge + recoil)
 }

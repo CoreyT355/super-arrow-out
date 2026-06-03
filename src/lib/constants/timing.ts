@@ -4,16 +4,14 @@
 // across refresh rates. Tweaking any of these changes player-perceptible
 // pacing — keep them in this one file so a single PR is the audit trail.
 
-/** Blocked-tap bounce: one damped-spring recoil. The snake lurches a small,
- *  FIXED distance toward the blocker, springs back past rest, and settles —
- *  the same rigid slide-along-its-path motion as a drain, just tiny and
- *  reversing, so it reads as "nope" instead of a half-finished exit. (The old
- *  nudge slid forward by the full distance to the blocker, which looked like a
- *  partial drain for far blockers.) */
-export const BOUNCE_MS = 380;
-
-/** Peak forward lurch of the bounce, in cells. Small + fixed on purpose. */
-export const BOUNCE_CELLS = 0.42;
+/** Blocked-tap "charge": the snake slides all the way up to its blocker at a
+ *  constant on-screen speed (so it matches a drain and never whips), then
+ *  bounces back to rest. The charge duration scales with the distance to the
+ *  blocker, clamped to [CHARGE_MIN_MS, CHARGE_MAX_MS]; RECOIL_MS is the fixed
+ *  spring-back-and-settle that follows the impact. */
+export const CHARGE_MIN_MS = 120;
+export const CHARGE_MAX_MS = 550;
+export const RECOIL_MS     = 300;
 
 /** Half-period of the red-flash penalty (×4 across the full flash cycle). */
 export const FLASH_HALF = 90;

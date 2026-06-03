@@ -14,14 +14,18 @@
 
     const rows = $derived(
         ACHIEVEMENTS.map(a => {
-            const at = unlocked[a.id];
-            const isUnlocked = at != null;
+            const isUnlocked = unlocked[a.id] != null;
             const hidden = a.secret && !isUnlocked;
+            // Unlocked → the snarky flavor (the payoff). Locked → the plain
+            // requirement so you know what to chase. Secret → masked.
+            const description = hidden
+                ? 'Keep crawling to discover this one.'
+                : isUnlocked ? a.flavor : a.description;
             return {
-                id:          a.id,
-                icon:        hidden ? '🔒' : a.icon,
-                title:       hidden ? 'Secret achievement' : a.title,
-                description: hidden ? 'Keep playing to discover this one.' : a.description,
+                id:    a.id,
+                icon:  hidden ? '🔒' : a.icon,
+                title: hidden ? 'Secret Achievement' : a.title,
+                description,
                 isUnlocked,
             };
         }),

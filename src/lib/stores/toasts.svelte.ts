@@ -4,7 +4,7 @@ import { ACHIEVEMENTS, achievementById, type Achievement } from '$lib/config/ach
 // be raised from anywhere (a game win, or the dev trigger) and is rendered once
 // at the app root by <AchievementToasts/>. Not persisted — purely ephemeral UI.
 
-const TOAST_MS = 4200;
+const TOAST_MS = 6000;
 
 interface Toast {
     uid:         number;

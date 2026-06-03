@@ -18,16 +18,19 @@ export const FLASH_HALF = 90;
 
 /** Drain speed model: snakes exit at a CONSTANT on-screen speed, so the
  *  animation looks uniform within a board and across board sizes (the duration
- *  is derived from how far the snake slides in pixels, not a fixed time).
+ *  is derived from how far the snake slides in pixels, not a fixed time). The
+ *  caller caps the slide distance to the visible viewport (off-screen travel is
+ *  "free"), so durations stay bounded without a tight time cap that would make
+ *  long drains move faster than short ones.
  *
  *  - EXIT_SPEED_PX_PER_MS — on-screen drain speed (pixels per millisecond).
  *  - EXIT_MIN_DUR — floor so a tiny slide (a few px on a huge board) still
  *    reads as motion rather than a pop.
- *  - EXIT_MAX_DUR — ceiling so a screen-spanning drain (or a zoomed-in long
- *    one) never drags. A full-screen slide lands a touch under this. */
+ *  - EXIT_MAX_DUR — pathological safety ceiling only; with viewport capping a
+ *    normal drain (≤ ~2 viewport spans) stays under it, so it rarely bites. */
 export const EXIT_SPEED_PX_PER_MS = 1.1;
 export const EXIT_MIN_DUR = 200;
-export const EXIT_MAX_DUR = 700;
+export const EXIT_MAX_DUR = 1500;
 
 /** Total win-collapse animation. */
 export const VORTEX_DURATION = 2000;

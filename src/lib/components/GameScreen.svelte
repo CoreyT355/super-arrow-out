@@ -160,18 +160,28 @@ import { type AchievementStats } from '$lib/config/achievements';
             const L_total   = measurePath(routeD);
             const L_snake   = measurePath(snakeD);
 
-            // Constant on-screen speed: the snake slides `travel` grid units;
-            // convert to pixels (cell size × zoom) so the duration tracks the
-            // distance actually covered on screen (see drainDurationMs).
-            const travel     = L_total - L_snake;
-            const pxPerCell  = panZoomState.containerH > 0
-                ? (panZoomState.containerH / H) * panZoomState.scale
+            // Constant on-screen speed, ignoring off-screen travel. The snake
+            // could slide `fullTravel` grid units to fully clear the GRID, but
+            // anything past the visible viewport is invisible — so we cap the
+            // animated slide at the on-screen distance (the visible span in the
+            // exit axis, plus the on-screen part of the body). Duration is then
+            // that distance ÷ a constant px/ms speed. At scale 1 the viewport is
+            // the whole board, so this equals the full slide (no early cut);
+            // zoomed in, the off-screen tail is "free" and drains stay snappy.
+            const fullTravel  = L_total - L_snake;
+            const scale       = panZoomState.scale > 0 ? panZoomState.scale : 1;
+            const horizontal  = arrow.direction === 'E' || arrow.direction === 'W';
+            const visibleSpan = (horizontal ? W : H) / scale;          // cells across the viewport
+            const N           = arrow.path.length;
+            const travel      = Math.min(fullTravel, visibleSpan + Math.min(N, visibleSpan));
+            const pxPerCell   = panZoomState.containerH > 0
+                ? (panZoomState.containerH / H) * scale
                 : 0;
-            const durationMs = drainDurationMs(travel, pxPerCell);
+            const durationMs  = drainDurationMs(travel, pxPerCell);
 
             anims = { ...anims, [id]: {
                 phase: 'exiting', startTime: t,
-                routeD, L_total, L_snake, durationMs,
+                routeD, L_total, L_snake, travel, durationMs,
             } };
         } else if (reducedMotion) {
             // Skip nudge/bounce/flash entirely: apply penalty instantly.

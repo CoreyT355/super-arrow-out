@@ -147,7 +147,7 @@
                         <!-- Drain animation: snake-length dash slides along extended route via stroke-dashoffset -->
                         {@const el       = Math.max(0, now - anim.startTime)}
                         {@const p        = Math.min(1, el / (anim.durationMs ?? 1))}
-                        {@const travel   = (anim.L_total ?? 0) - (anim.L_snake ?? 0)}
+                        {@const travel   = anim.travel ?? (anim.L_total ?? 0) - (anim.L_snake ?? 0)}
                         {@const offset   = -p * travel}
                         {@const headLen  = Math.min(anim.L_total ?? 0, (anim.L_snake ?? 0) + p * travel)}
                         {@const ref      = pathRefs[arrow.id]}

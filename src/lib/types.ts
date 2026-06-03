@@ -40,5 +40,7 @@ export interface Anim {
     routeD?:     string;  // SVG path string for the full route (tail → head → extension)
     L_total?:    number;  // total length of routeD in SVG units (cells)
     L_snake?:    number;  // length of just the snake portion = the visible "dash"
+    travel?:     number;  // how far the dash slides (≤ L_total − L_snake): capped
+                          //   to the on-screen distance so off-screen travel is "free"
     durationMs?: number;  // total exit animation duration
 }

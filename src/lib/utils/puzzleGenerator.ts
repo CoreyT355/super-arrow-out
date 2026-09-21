@@ -978,9 +978,24 @@ function repointHeadAt(work: Arrow[], ai: number, k: number): void {
 
     // Interior: split, keeping a South/East neighbour as the new body so the
     // re-rooted head exits North or West.
+    //
+    // Because `k` is the arrow's topmost-then-leftmost cell, BOTH in-arrow
+    // neighbours are South/East (a North/West one would itself be the more
+    // extreme cell), so either side is usually a legal keep. When both
+    // qualify the choice is free, and we use it to avoid orphaning a
+    // SINGLE cell: a 1-cell arrow renders as a bare arrowhead with no tail
+    // (`roundedPath` emits a lone moveto, which SVG does not stroke).
+    // Discarded length is `k` keeping next, `len - 1 - k` keeping prev.
     const c = A.path[k];
     const next = A.path[k + 1];
-    const keepNext = (next.x === c.x && next.y === c.y + 1) || (next.x === c.x + 1 && next.y === c.y);
+    const prev = A.path[k - 1];
+    const isSouthEast = (p: GridPos) =>
+        (p.x === c.x && p.y === c.y + 1) || (p.x === c.x + 1 && p.y === c.y);
+    const nextOk = isSouthEast(next);
+    const prevOk = isSouthEast(prev);
+    const keepNext = nextOk && prevOk
+        ? k !== 1 || A.path.length - 1 - k === 1   // both legal → avoid a 1-cell orphan
+        : nextOk;
     const cSide = keepNext ? A.path.slice(k) : A.path.slice(0, k + 1).reverse();
     const otherSide = keepNext ? A.path.slice(0, k) : A.path.slice(k + 1);
     work[ai] = { ...A, path: cSide, direction: exitForStep(cSide[1].x - cSide[0].x, cSide[1].y - cSide[0].y) };
@@ -1074,6 +1089,20 @@ function fixSelfBlockedArrows(arrows: Arrow[], w: number, h: number): Arrow[] | 
 // ─────────────────────────────────────────────────────────────────────────
 const MAX_GEN_ATTEMPTS = 12;
 
+// Arrow-quality threshold for the final absorb pass. Kept low (constant)
+// because rescue arrows in tight pockets often have tails bordering other
+// arrows' bodies, not tails — absorbShortArrows can't merge those, and
+// a few short arrows on a huge board are a better outcome than the
+// previous behaviour of leaving large regions empty. Module-level because
+// both the normal pipeline (E.4/E.6) and the deadlock-repair fallback use it.
+const ABSORB_MIN = 3;
+
+/** A board is shippable when every arrow can eventually be tapped and none
+ *  appears to block itself — the same bar the non-repaired path clears. */
+function isBoardClean(arrows: Arrow[], w: number, h: number): boolean {
+    return isPuzzleSolvable(arrows, w, h) && !arrows.some(a => isSelfBlocked(a, w, h));
+}
+
 export function generateLevel(width = 9, height = 9, seed?: number, mask?: boolean[]): Level {
     // Swap in a deterministic PRNG for the duration of a seeded call so
     // any failure surfaced in a test is reproducible from one integer.
@@ -1097,9 +1126,33 @@ export function generateLevel(width = 9, height = 9, seed?: number, mask?: boole
         // last candidate so the shipped level is always solvable rather than
         // hanging the UI on endless retries.
         const repaired = repairDeadlocks(last!.arrows, width, height);
+
+        // The repair's split primitive can still orphan a single cell as its
+        // own arrow (e.g. a 3-cell arrow re-rooted at its middle), and a
+        // head-only arrow renders as a bare arrowhead with no tail —
+        // `roundedPath` emits a lone moveto for it, which SVG doesn't stroke.
+        // This path skips the main pipeline's E.5–E.7 cleanup, so run it here.
+        //
+        // The merges re-parent cells between arrows, which can reintroduce a
+        // blocking cycle, so the tidied board is re-repaired and re-verified.
+        // We only take it if it comes back clean AND orphan-free; otherwise we
+        // ship `repaired`, which is exactly the previous behaviour. Cosmetics
+        // never cost solvability.
+        let final = repaired;
+        if (repaired.some(a => a.path.length === 1)) {
+            let tidied = forceAbsorbHeadOnly(repaired);
+            tidied = absorbShortArrows(tidied, ABSORB_MIN);
+            tidied = alignDirectionsWithGeometry(tidied);
+            // Re-number first: the merges above can emit placeholder ids, and
+            // the repair keys its dependency graph by id.
+            tidied = repairDeadlocks(tidied.map((a, i) => ({ ...a, id: i })), width, height);
+            if (!tidied.some(a => a.path.length === 1) && isBoardClean(tidied, width, height)) {
+                final = tidied;
+            }
+        }
         return {
             ...last!,
-            arrows: repaired.map((a, i) => ({ ...a, id: i, color: COLORS[i % COLORS.length] })),
+            arrows: final.map((a, i) => ({ ...a, id: i, color: COLORS[i % COLORS.length] })),
         };
     } finally {
         rng = prevRng;
@@ -1132,13 +1185,6 @@ function generateLevelOnce(
     // would exceed the cap (e.g. Floor Boss shortDim=91 → raw min=45 > max=30),
     // which inverts the random range and breaks the body-length calculation.
     const minLength = Math.min(Math.max(4, Math.floor(shortDimension * 0.5)), Math.max(4, maxLength - 4));
-
-    // Arrow-quality threshold for the final absorb pass. Kept low (constant)
-    // because rescue arrows in tight pockets often have tails bordering other
-    // arrows' bodies, not tails — absorbShortArrows can't merge those, and
-    // a few short arrows on a huge board are a better outcome than the
-    // previous behaviour of leaving large regions empty.
-    const ABSORB_MIN = 3;
 
     // Dead-pocket guard during the main placement loop. Was previously tied
     // to `Math.floor(shortDimension * 0.25)`, which on Ludicrous/Iron Tangle

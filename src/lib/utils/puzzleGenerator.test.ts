@@ -341,4 +341,57 @@ describe('generateLevel — head/body alignment invariant', () => {
             }
         }
     });
+
+    // The case above stops at Super Hard, which never reaches the
+    // deadlock-repair fallback in generateLevel — and the repair is exactly
+    // where head-only arrows came from: its split primitive can orphan a
+    // single cell as its own arrow, and nothing downstream absorbed it. These
+    // sizes are the ones that actually exhaust MAX_GEN_ATTEMPTS.
+    it('no arrow is head-only on the biggest boards', () => {
+        const cases: Array<[number, number, number]> = [
+            [120, 137, 6],  // Ludicrous
+            [180, 180, 4],  // The Iron Tangle (square)
+            [115, 226, 4],  // Iron Tangle as a portrait phone derives it
+            [213, 122, 4],  // Iron Tangle as a desktop viewport derives it
+        ];
+        for (const [w, h, trials] of cases) {
+            for (let trial = 0; trial < trials; trial++) {
+                const seed = (w * 7_919) ^ (h * 104_729) ^ (trial * 1_299_709);
+                const level = generateLevel(w, h, seed);
+                const headOnly = level.arrows.filter(a => a.path.length < 2);
+                if (headOnly.length > 0) {
+                    throw new Error(
+                        `${headOnly.length} head-only arrow(s) on ${w}x${h} seed=${seed}: ` +
+                        JSON.stringify(headOnly.slice(0, 5).map(a => ({ id: a.id, dir: a.direction, at: a.path[0] })))
+                    );
+                }
+            }
+        }
+    }, 300_000);
+
+    // Regression for the bare-arrowhead bug. This seed exhausts every
+    // generation attempt, so it runs through repairDeadlocks — which used to
+    // ship 15 single-cell arrows, each rendering as an arrowhead with no tail
+    // (roundedPath emits a lone moveto for a 1-cell path, and SVG does not
+    // stroke that). The tidy-up must remove them without costing solvability
+    // or the full tiling.
+    it('repair fallback ships no bare arrowheads (115x226 seed 18)', () => {
+        const w = 115, h = 226;
+        const level = generateLevel(w, h, 18);
+
+        const headOnly = level.arrows.filter(a => a.path.length < 2);
+        expect(
+            headOnly.length,
+            `bare arrowheads: ${JSON.stringify(headOnly.slice(0, 5).map(a => a.path[0]))}`,
+        ).toBe(0);
+
+        // Still a full tiling, still drainable, still self-block-free.
+        const covered = new Set<string>();
+        for (const a of level.arrows) for (const p of a.path) covered.add(`${p.x},${p.y}`);
+        expect(covered.size).toBe(w * h);
+        for (const a of level.arrows) {
+            expect(isSelfBlocked(a, w, h), `self-blocked arrow id=${a.id}`).toBe(false);
+        }
+        expect(simulateDrain(level.arrows, w, h)).toBe(level.arrows.length);
+    }, 120_000);
 });
